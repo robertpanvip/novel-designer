@@ -4,8 +4,9 @@
    交互：新增条目 Modal（选分类 + 标题 + 描述）、删除需 confirm
    写操作均通过 AppStore actions（TODO: 接入真实后端时替换 actions 内部实现）
    ============================================================ */
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Globe2, Plus, Trash2, MapPin, History, Building2, ScrollText, ImagePlus, RefreshCw } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { useStore } from '../store/AppStore';
 import { sceneImageUrl, generateSceneImage } from '../api/image';
 import {
@@ -23,14 +24,15 @@ import {
   SectionHead,
   StatCard,
 } from '../components/ui';
+import type { ImageConfig, StoreActions, WorldItem, WorldSection } from '../types';
 
 /* 分类 → 图标映射（未命中时回退地球图标） */
-const SECTION_ICONS = { 地理: MapPin, 历史: History, 势力: Building2, 规则: ScrollText };
+const SECTION_ICONS: Record<string, LucideIcon> = { 地理: MapPin, 历史: History, 势力: Building2, 规则: ScrollText };
 
 /* ---------------- 场景配图横幅 ----------------
    统一风格来自「AI 配图」配置(config.style)，保证各场景美术风格一致；
    变体仅改变构图/机位，不改变主题描述。 */
-function SceneBanner({ s, img, actions, variant, onRegen }) {
+function SceneBanner({ s, img, actions, variant, onRegen }: { s: WorldSection; img: ImageConfig; actions: StoreActions; variant: number; onRegen: () => void }) {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(false);
   const url = sceneImageUrl({ config: img, scene: s, variant });
@@ -81,11 +83,11 @@ export default function World() {
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
   /* 每个分类的配图变体序号（仅变构图，风格统一） */
-  const [variants, setVariants] = useState({});
-  const bumpVariant = (id) => setVariants((v) => ({ ...v, [id]: (v[id] || 0) + 1 }));
+  const [variants, setVariants] = useState<Record<string, number>>({});
+  const bumpVariant = (id: string) => setVariants((v) => ({ ...v, [id]: (v[id] || 0) + 1 }));
 
   /* 打开新增条目 Modal（可选预选分类） */
-  const openAdd = (sid) => {
+  const openAdd = (sid?: string) => {
     setSectionId(sid || world.sections[0]?.id || '');
     setTitle('');
     setDesc('');
@@ -114,7 +116,7 @@ export default function World() {
   };
 
   /* 删除条目（先 confirm） */
-  const remove = (sid, item) => {
+  const remove = (sid: string, item: WorldItem) => {
     if (!window.confirm(`确定删除设定「${item.title}」？此操作不可撤销。`)) return;
     actions.removeWorldItem(sid, item.id);
     toast(`已删除「${item.title}」`);
@@ -170,7 +172,7 @@ export default function World() {
       {/* 分类区块 */}
       <div className="grid grid-2">
         {world.sections.map((s, i) => (
-          <Card key={s.id} className="reveal" style={{ ['--d']: `${120 + i * 60}ms`, padding: '20px 22px' }}>
+          <Card key={s.id} className="reveal" style={{ '--d': `${120 + i * 60}ms`, padding: '20px 22px' }}>
             {/* 场景配图：统一风格 + 变体重生成 */}
             <SceneBanner
               s={s}
@@ -220,7 +222,7 @@ export default function World() {
 
       {/* 城史时间线 */}
       {world.timeline.length > 0 && (
-        <Card className="reveal" style={{ ['--d']: '220ms', padding: '22px 24px', marginTop: 24 }}>
+        <Card className="reveal" style={{ '--d': '220ms', padding: '22px 24px', marginTop: 24 }}>
           <SectionHead title="城史时间线" sub="纵向时间轴，末项以朱砂高亮为「现在」。" />
           <div style={{ padding: '4px 4px 0' }}>
             {world.timeline.map((t, i) => {

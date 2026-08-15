@@ -2,8 +2,9 @@
    砚墨 · 小说设计器 — Mock 数据（单一数据源）
    页面一律从 AppStore 读取，禁止散落硬编码
    ============================================================ */
+import type { Project, Chapter, Character, WorldData, PlotData, LLMConfig } from '../types';
 
-export const PROJECT = {
+export const PROJECT: Project = {
   id: 'p-mist-harbor',
   title: '雾港潮生',
   genre: '悬疑 · 心理 · 群像',
@@ -20,7 +21,7 @@ export const PROJECT = {
   updatedAt: '2026-08-15',
 };
 
-export const CHAPTERS = [
+export const CHAPTERS: Chapter[] = [
   {
     id: 'ch-01',
     no: 1,
@@ -89,7 +90,7 @@ export const CHAPTERS = [
   },
 ];
 
-export const CHARACTERS = [
+export const CHARACTERS: Character[] = [
   {
     id: 'c-01',
     name: '陆昭',
@@ -219,6 +220,7 @@ export const CHARACTERS = [
     goals: ['破案', '保住局里的体面'],
     conflicts: '专案组被要求"尽快结案"的压力。',
     arc: '从"依法办案"到"为真相破例"',
+    note: '曾破获多起码头旧案，对沈氏有所了解。',
     relations: [
       { name: '池遥', type: '工作伙伴' },
       { name: '陆昭', type: '亦敌亦友' },
@@ -245,7 +247,7 @@ export const CHARACTERS = [
   },
 ];
 
-export const WORLD = {
+export const WORLD: WorldData = {
   sections: [
     {
       id: 'ws-1',
@@ -301,7 +303,7 @@ export const WORLD = {
   ],
 };
 
-export const PLOT = {
+export const PLOT: PlotData = {
   acts: [
     {
       id: 'act-1',
@@ -339,7 +341,7 @@ export const PLOT = {
   ],
 };
 
-export const LLM_DEFAULT = {
+export const LLM_DEFAULT: LLMConfig = {
   provider: 'deepseek',
   baseUrl: 'https://api.deepseek.com/v1',
   apiKey: '',

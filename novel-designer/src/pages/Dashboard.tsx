@@ -3,7 +3,7 @@
    数据统一从 useStore 读取；今日灵感走 api 存根。
    TODO: 接入真实后端 —— 替换 runAI 存根为真实接口调用
    ============================================================ */
-import React, { useState, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   FileText,
@@ -30,9 +30,10 @@ import {
 } from '../components/ui';
 import { useStore } from '../store/AppStore';
 import { runAI } from '../api/llm';
+import type { ChapterStatus } from '../types';
 
 // 章节状态 → 文案 / Tag tone
-const STATUS_META = {
+const STATUS_META: Record<ChapterStatus, { label: string; tone: string }> = {
   done: { label: '已完成', tone: 'success' },
   revising: { label: '修订中', tone: 'warning' },
   draft: { label: '草稿', tone: 'default' },

@@ -4,7 +4,7 @@
    正文受控 + 简单防抖写入 store；AI 生成走 api 存根。
    TODO: 接入真实后端 —— 替换 runAI 存根为真实接口调用
    ============================================================ */
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Plus,
@@ -22,19 +22,21 @@ import {
   BookOpen,
   ChevronRight,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { Card, Button, Input, Select, Tag, EmptyState } from '../components/ui';
 import { useStore } from '../store/AppStore';
 import { runAI } from '../api/llm';
+import type { AIActionKey, ChapterStatus } from '../types';
 
 // 章节状态 → 文案 / 状态点颜色
-const STATUS_META = {
+const STATUS_META: Record<ChapterStatus, { label: string; color: string }> = {
   done: { label: '已完成', color: 'var(--success)' },
   revising: { label: '修订中', color: 'var(--warning)' },
   draft: { label: '草稿', color: 'var(--text-faint)' },
 };
 
 // AI 动作配置（图标 + 文案）
-const AI_ACTIONS = [
+const AI_ACTIONS: { key: AIActionKey; label: string; icon: LucideIcon }[] = [
   { key: 'continue', label: '续写', icon: ArrowRightToLine },
   { key: 'expand', label: '扩写', icon: Maximize2 },
   { key: 'polish', label: '润色', icon: Wand2 },
@@ -48,7 +50,7 @@ export default function Writer() {
   const navigate = useNavigate();
 
   // 选中章节（默认第一章）
-  const [selectedId, setSelectedId] = useState(chapters[0]?.id || null);
+  const [selectedId, setSelectedId] = useState<string | null>(chapters[0]?.id || null);
   const selected = chapters.find((c) => c.id === selectedId) || null;
 
   // 正文本地草稿（受控输入源），切换章节时重新载入
@@ -75,11 +77,11 @@ export default function Writer() {
   }, [chapters.length]);
 
   // 正文 textarea ref：用于光标定位与选区替换
-  const bodyRef = useRef(null);
+  const bodyRef = useRef<HTMLTextAreaElement | null>(null);
 
   // AI 生成状态
   const [genLoading, setGenLoading] = useState(false);
-  const [genAction, setGenAction] = useState(null);
+  const [genAction, setGenAction] = useState<AIActionKey | null>(null);
   const [genResult, setGenResult] = useState('');
   const genTextRef = useRef('');
   const stopRef = useRef(false);
@@ -90,13 +92,13 @@ export default function Writer() {
   };
 
   // 在光标处插入文本；caretOffset 控制插入后的光标位置
-  const insertAtCursor = (text, caretOffset = text.length) => {
-    if (!selected || !bodyRef.current) return;
+  const insertAtCursor = (text: string, caretOffset: number = text.length) => {
     const el = bodyRef.current;
+    if (!selected || !el) return;
     const start = el.selectionStart ?? draft.length;
     const end = el.selectionEnd ?? start;
     const next = draft.slice(0, start) + text + draft.slice(end);
-    actions.updateChapter(selectedId, { content: next });
+    actions.updateChapter(selected.id, { content: next });
     setDraft(next);
     const pos = start + caretOffset;
     requestAnimationFrame(() => {
@@ -107,7 +109,7 @@ export default function Writer() {
   };
 
   // 执行 AI 动作：流式展示生成结果，生成中可「停止」
-  const handleAI = async (action) => {
+  const handleAI = async (action: AIActionKey) => {
     if (!selected) {
       actions.toast('请先在左侧选择章节', 'warning');
       return;
@@ -146,15 +148,15 @@ export default function Writer() {
   const appendResult = () => {
     if (!selected || !genResult) return;
     const next = draft ? `${draft}\n\n${genResult}` : genResult;
-    actions.updateChapter(selectedId, { content: next });
+    actions.updateChapter(selected.id, { content: next });
     setDraft(next);
     actions.toast('已插入到正文末尾', 'success');
   };
 
   // 用生成结果替换正文中选中的文本（未选中则忽略并提示）
   const replaceSelection = () => {
-    if (!selected || !genResult || !bodyRef.current) return;
     const el = bodyRef.current;
+    if (!selected || !genResult || !el) return;
     const start = el.selectionStart;
     const end = el.selectionEnd;
     if (start == null || start === end) {
@@ -162,7 +164,7 @@ export default function Writer() {
       return;
     }
     const next = draft.slice(0, start) + genResult + draft.slice(end);
-    actions.updateChapter(selectedId, { content: next });
+    actions.updateChapter(selected.id, { content: next });
     setDraft(next);
     actions.toast('已替换选中文本', 'success');
   };
@@ -248,13 +250,13 @@ export default function Writer() {
               <div className="row" style={{ gap: 10 }}>
                 <Input
                   value={selected.title}
-                  onChange={(e) => actions.updateChapter(selectedId, { title: e.target.value })}
+                  onChange={(e) => actions.updateChapter(selected.id, { title: e.target.value })}
                   placeholder="章节标题"
                   style={{ flex: 1, fontWeight: 600, fontSize: 15 }}
                 />
                 <Select
                   value={selected.status}
-                  onChange={(e) => actions.updateChapter(selectedId, { status: e.target.value })}
+                  onChange={(e) => actions.updateChapter(selected.id, { status: e.target.value as ChapterStatus })}
                   style={{ width: 132, flex: 'none' }}
                 >
                   <option value="draft">草稿</option>

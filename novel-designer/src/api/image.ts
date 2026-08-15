@@ -8,13 +8,14 @@
    接入真实模型（IMG2IMG 参考图 + seed）时仅需替换各函数内部实现，
    页面调用方无需改动。全部存根标注：// TODO: replace with fetch('/api/…')
    ============================================================ */
+import type { ApiResponse, Character, GeneratedImage, ImageConfig, ImageProvider, TestRecord, WorldSection } from '../types';
 
-const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 const IMG_EP = 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image';
 
 /** 预置图片生成 Provider（可配置） */
-export const IMAGE_PROVIDERS = [
+export const IMAGE_PROVIDERS: ImageProvider[] = [
   {
     id: 'trae',
     name: '砚墨 · 文生图',
@@ -38,7 +39,7 @@ export const IMAGE_PROVIDERS = [
   },
 ];
 
-export const IMAGE_DEFAULT = {
+export const IMAGE_DEFAULT: ImageConfig = {
   provider: 'trae',
   style:
     'dark cinematic noir ink illustration, deep ink-blue and charcoal palette, single vermilion accent, misty coastal atmosphere, dramatic chiaroscuro lighting, painterly, high detail',
@@ -48,24 +49,29 @@ export const IMAGE_DEFAULT = {
   baseUrl: '',
   apiKey: '',
   connected: false,
-  lastTest: null,
+  lastTest: null as TestRecord | null,
   useCount: 0,
 };
 
-const SIZE_POOL = ['square_hd', 'square', 'portrait_4_3', 'portrait_16_9', 'landscape_4_3', 'landscape_16_9'];
+export const SIZE_POOL: string[] = ['square_hd', 'square', 'portrait_4_3', 'portrait_16_9', 'landscape_4_3', 'landscape_16_9'];
 
 /* ---------------- 纯函数：由配置+主体直接构造图片 URL（同步，供渲染） ---------------- */
 
-function encodePrompt(prompt) {
+function encodePrompt(prompt: string): string {
   return encodeURIComponent(prompt);
 }
 
-export function buildImageUrl({ prompt, size }) {
+export interface BuildImageUrlInput {
+  prompt: string;
+  size?: string;
+}
+
+export function buildImageUrl({ prompt, size }: BuildImageUrlInput): string {
   return `${IMG_EP}?prompt=${encodePrompt(prompt)}&image_size=${size || 'square_hd'}`;
 }
 
 /** 人物画像提示词：身份锚点恒定，仅变体微调姿态/构图 */
-export function buildCharacterPrompt(character, style, variant = 0) {
+export function buildCharacterPrompt(character: Character, style: string, variant = 0): string {
   const name = character?.name || '角色';
   const appearance = character?.appearance || character?.identity || '人物肖像';
   const tags = (character?.tags || []).join('、');
@@ -79,7 +85,7 @@ export function buildCharacterPrompt(character, style, variant = 0) {
 }
 
 /** 场景配图提示词：统一风格后缀 + 主题/描述 */
-export function buildScenePrompt(scene, style, variant = 0) {
+export function buildScenePrompt(scene: WorldSection, style: string, variant = 0): string {
   const title = scene?.title || '场景';
   const desc = scene?.desc || '';
   const compHints = [
@@ -91,18 +97,30 @@ export function buildScenePrompt(scene, style, variant = 0) {
   return `Scene illustration: ${title} — ${desc}. ${style}. ${comp}, no text, no watermark`;
 }
 
+export interface CharacterImageUrlInput {
+  config?: Partial<ImageConfig>;
+  character: Character;
+  variant?: number;
+}
+
 /** 人物画像 URL（同步，用于卡片初始渲染） */
-export function characterImageUrl({ config, character, variant = 0 }) {
-  const cfg = { ...IMAGE_DEFAULT, ...(config || {}) };
+export function characterImageUrl({ config, character, variant = 0 }: CharacterImageUrlInput): string {
+  const cfg: ImageConfig = { ...IMAGE_DEFAULT, ...(config || {}) };
   return buildImageUrl({
     prompt: buildCharacterPrompt(character, cfg.style, variant),
     size: cfg.size,
   });
 }
 
+export interface SceneImageUrlInput {
+  config?: Partial<ImageConfig>;
+  scene: WorldSection;
+  variant?: number;
+}
+
 /** 场景配图 URL（同步） */
-export function sceneImageUrl({ config, scene, variant = 0 }) {
-  const cfg = { ...IMAGE_DEFAULT, ...(config || {}) };
+export function sceneImageUrl({ config, scene, variant = 0 }: SceneImageUrlInput): string {
+  const cfg: ImageConfig = { ...IMAGE_DEFAULT, ...(config || {}) };
   return buildImageUrl({
     prompt: buildScenePrompt(scene, cfg.style, variant),
     size: cfg.sceneSize,
@@ -111,15 +129,21 @@ export function sceneImageUrl({ config, scene, variant = 0 }) {
 
 /* ---------------- 异步存根（模拟生成耗时，供「重新生成」按钮） ---------------- */
 
+export interface GenerateCharacterImageInput {
+  config?: Partial<ImageConfig>;
+  character: Character;
+  variant?: number;
+}
+
 /**
  * 生成/重新生成角色画像
  * POST /api/image/character  body: { config, character, variant }
  * 真实接入：以 character.appearance 为参考图 + seed 做 IMG2IMG，保证形象连贯。
  */
-export async function generateCharacterImage({ config, character, variant = 0 }) {
+export async function generateCharacterImage({ config, character, variant = 0 }: GenerateCharacterImageInput): Promise<ApiResponse<GeneratedImage>> {
   // TODO: replace with fetch('/api/image/character', { method:'POST', ... })
   await delay(1200);
-  const cfg = { ...IMAGE_DEFAULT, ...(config || {}) };
+  const cfg: ImageConfig = { ...IMAGE_DEFAULT, ...(config || {}) };
   const url = characterImageUrl({ config: cfg, character, variant });
   return {
     code: 0,
@@ -131,14 +155,20 @@ export async function generateCharacterImage({ config, character, variant = 0 })
   };
 }
 
+export interface GenerateSceneImageInput {
+  config?: Partial<ImageConfig>;
+  scene: WorldSection;
+  variant?: number;
+}
+
 /**
  * 生成/重新生成场景配图
  * POST /api/image/scene  body: { config, scene, variant }
  */
-export async function generateSceneImage({ config, scene, variant = 0 }) {
+export async function generateSceneImage({ config, scene, variant = 0 }: GenerateSceneImageInput): Promise<ApiResponse<GeneratedImage>> {
   // TODO: replace with fetch('/api/image/scene', { method:'POST', ... })
   await delay(1200);
-  const cfg = { ...IMAGE_DEFAULT, ...(config || {}) };
+  const cfg: ImageConfig = { ...IMAGE_DEFAULT, ...(config || {}) };
   const url = sceneImageUrl({ config: cfg, scene, variant });
   return {
     code: 0,
@@ -150,11 +180,21 @@ export async function generateSceneImage({ config, scene, variant = 0 }) {
   };
 }
 
+export interface TestImageInput {
+  provider: string;
+  baseUrl?: string;
+  apiKey?: string;
+}
+
+export type ImageTestResult =
+  | { ok: true; latency: number; message: string }
+  | { ok: false; message: string };
+
 /**
  * 测试图片生成连接
  * POST /api/image/test  body: { provider, baseUrl, apiKey, size }
  */
-export async function testImageConnection({ provider, baseUrl, apiKey }) {
+export async function testImageConnection({ provider, apiKey }: TestImageInput): Promise<ImageTestResult> {
   // TODO: replace with fetch('/api/image/test', { method:'POST', ... })
   await delay(800);
   if (provider !== 'trae' && !apiKey) {
@@ -166,5 +206,3 @@ export async function testImageConnection({ provider, baseUrl, apiKey }) {
     message: '配图服务可用',
   };
 }
-
-export { SIZE_POOL };

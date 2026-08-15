@@ -22,13 +22,28 @@ import {
   EmptyState,
   SectionHead,
 } from '../components/ui';
+import type { Character } from '../types';
 
 /* 预设角色色板（与角色档案色一致，禁止新增主题色） */
-const PALETTE = ['#E5533D', '#4C6AA0', '#D8A25E', '#B58EC2', '#8FA3BF', '#4CAF7D', '#E0A93E', '#7C8698'];
+const PALETTE = ['#E5533D', '#4C6AA0', '#D8A25E', '#B58EC2', '#8FA3BF', '#4CAF7D', '#E0A93E', '#7C8698'] as const;
 /* 标签语气轮换 */
-const TAG_TONES = ['t-primary', 't-gold', 't-success', 't-warning'];
+const TAG_TONES = ['t-primary', 't-gold', 't-success', 't-warning'] as const;
 
-const EMPTY_FORM = {
+interface FormState {
+  id: string | null;
+  name: string;
+  title: string;
+  identity: string;
+  personality: string;
+  appearance: string;
+  tags: string;
+  goals: string;
+  arc: string;
+  note: string;
+  color: string;
+}
+
+const EMPTY_FORM: FormState = {
   id: null,
   name: '',
   title: '',
@@ -45,7 +60,20 @@ const EMPTY_FORM = {
 /* ---------------- 关系网：SVG 径向图 ----------------
    节点按角色数量均分圆周，连线来自 relations 数组（两端均在角色库中）。
    TODO: 接入真实后端 —— 角色/关系数据来自后端时仅需替换数据来源。 */
-function RelationGraph({ characters }) {
+interface PositionMap {
+  [name: string]: { x: number; y: number };
+}
+
+interface Edge {
+  from: Character;
+  label: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+function RelationGraph({ characters }: { characters: Character[] }) {
   const W = 860;
   const H = 430;
   const cx = W / 2;
@@ -53,8 +81,8 @@ function RelationGraph({ characters }) {
   const R = 138;
 
   /* 静态径向坐标 */
-  const pos = useMemo(() => {
-    const m = {};
+  const pos = useMemo<PositionMap>(() => {
+    const m: PositionMap = {};
     const n = characters.length;
     characters.forEach((c, i) => {
       const a = (i / n) * Math.PI * 2 - Math.PI / 2;
@@ -64,9 +92,9 @@ function RelationGraph({ characters }) {
   }, [characters]);
 
   /* 由 relations 生成连线（去重：A→B 与 B→A 只画一条） */
-  const edges = useMemo(() => {
-    const seen = new Set();
-    const list = [];
+  const edges = useMemo<Edge[]>(() => {
+    const seen = new Set<string>();
+    const list: Edge[] = [];
     characters.forEach((c) => {
       (c.relations || []).forEach((r) => {
         if (!pos[r.name]) return; // 关系对象不在本作角色库中则忽略
@@ -199,7 +227,7 @@ function RelationGraph({ characters }) {
 }
 
 /* ---------------- 角色卡片 ---------------- */
-function CharacterCard({ c, delay, onEdit, onDelete }) {
+function CharacterCard({ c, delay, onEdit, onDelete }: { c: Character; delay: number; onEdit: (c: Character) => void; onDelete: (c: Character) => void }) {
   const { img, actions } = useStore();
   const [variant, setVariant] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -209,13 +237,13 @@ function CharacterCard({ c, delay, onEdit, onDelete }) {
   const url = characterImageUrl({ config: img, character: c, variant });
 
   /* 重新生成画像：变体仅改变姿态/构图，身份描述恒定（TODO: 接入真实后端，用参考图+seed 做 IMG2IMG） */
-  const regen = async (e) => {
+  const regen = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (loading) return;
     setLoading(true);
     setImgErr(false);
     try {
-      const res = await generateCharacterImage({ config: img, character: c, variant: variant + 1 });
+      await generateCharacterImage({ config: img, character: c, variant: variant + 1 });
       setVariant((v) => v + 1);
       actions.setImg({ useCount: (img.useCount || 0) + 1 });
       actions.toast(`已为「${c.name}」重新生成画像，形象保持一致`, 'success');
@@ -227,7 +255,7 @@ function CharacterCard({ c, delay, onEdit, onDelete }) {
   };
 
   return (
-    <Card className="reveal" style={{ ['--d']: `${delay}ms`, overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
+    <Card className="reveal" style={{ '--d': `${delay}ms`, overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
       {/* AI 画像 */}
       <div className={`portrait-frame ${loading ? 'loading' : ''}`}>
         {imgErr ? (
@@ -328,12 +356,12 @@ export default function Characters() {
   const { characters, actions } = useStore();
   const { toast } = actions;
   const [modalOpen, setModalOpen] = useState(false);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [filter, setFilter] = useState(null); // 当前标签筛选
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [filter, setFilter] = useState<string | null>(null); // 当前标签筛选
 
   /* 全部标签（用于筛选 chips） */
-  const allTags = useMemo(() => {
-    const s = new Set();
+  const allTags = useMemo<string[]>(() => {
+    const s = new Set<string>();
     characters.forEach((c) => (c.tags || []).forEach((t) => s.add(t)));
     return [...s];
   }, [characters]);
@@ -348,7 +376,7 @@ export default function Characters() {
     setForm(EMPTY_FORM);
     setModalOpen(true);
   };
-  const openEdit = (c) => {
+  const openEdit = (c: Character) => {
     setForm({
       id: c.id,
       name: c.name,
@@ -365,7 +393,8 @@ export default function Characters() {
     setModalOpen(true);
   };
 
-  const setField = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const setField = (k: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setForm((f) => ({ ...f, [k]: e.target.value }));
 
   /* 提交新增 / 编辑 */
   const submit = () => {
@@ -385,7 +414,7 @@ export default function Characters() {
       arc: form.arc.trim(),
       note: form.note.trim(),
       color: form.color,
-      relations: [],
+      relations: [] as Character['relations'],
     };
     if (form.id) {
       actions.updateCharacter(form.id, payload);
@@ -398,7 +427,7 @@ export default function Characters() {
   };
 
   /* 删除（先 confirm） */
-  const remove = (c) => {
+  const remove = (c: Character) => {
     if (!window.confirm(`确定删除角色「${c.name}」？此操作不可撤销。`)) return;
     actions.removeCharacter(c.id);
     toast(`已删除「${c.name}」`);
@@ -419,14 +448,14 @@ export default function Characters() {
       />
 
       {/* 关系网 */}
-      <Card className="reveal" style={{ ['--d']: '40ms', padding: '22px 24px', marginBottom: 24 }}>
+      <Card className="reveal" style={{ '--d': '40ms', padding: '22px 24px', marginBottom: 24 }}>
         <SectionHead title="关系网" sub="节点按角色径向排布，连线即档案中的 relations 关系。" />
         <RelationGraph characters={characters} />
       </Card>
 
       {/* 标签筛选 chips */}
       {characters.length > 0 && (
-        <div className="row reveal" style={{ ['--d']: '90ms', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
+        <div className="row reveal" style={{ '--d': '90ms', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
           <span className="faint" style={{ fontSize: 12.5 }}>筛选：</span>
           <button
             onClick={() => setFilter(null)}

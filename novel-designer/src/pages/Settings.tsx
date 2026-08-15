@@ -3,24 +3,28 @@
    ------------------------------------------------------------
    接入任意 OpenAI 兼容大模型。配置通过 useStore() 的 setLLM
    实时写入 store 并持久化到 localStorage；API Key 仅存本地，
-   绝不外发。模型列表 / 连接测试 / 用量统计走 llm.js 存根层。
+   绝不外发。模型列表 / 连接测试 / 用量统计走 llm.ts 存根层。
    ============================================================ */
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Cpu, Eye, EyeOff, Plug, Save, RotateCcw, Check, ChevronDown,
   PenLine, Expand, Sparkles, RefreshCw, Lightbulb, ShieldCheck,
   CheckCircle2, XCircle, Wand2,
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import {
   Button, IconBtn, Field, Input, Select, Textarea, Tag, Card,
   SectionHead, PageHead, EmptyState, Slider,
 } from '../components/ui';
 import { useStore } from '../store/AppStore';
 import { PROVIDERS, listModels, testConnection, fetchUsage } from '../api/llm';
+import type { TestResult } from '../api/llm';
 import { IMAGE_PROVIDERS, IMAGE_DEFAULT, testImageConnection, SIZE_POOL } from '../api/image';
+import type { ImageTestResult } from '../api/image';
+import type { AIActionKey, Provider, UsageData } from '../types';
 
 /* 六种创作能力的动作元信息（对应 llm.actions 的键） */
-const ACTION_META = [
+const ACTION_META: { key: AIActionKey; label: string; icon: LucideIcon; hint: string }[] = [
   { key: 'continue', label: '续写', icon: PenLine, hint: '顺着已有文风自然续写 300–500 字' },
   { key: 'expand', label: '扩写', icon: Expand, hint: '丰富细节与层次，扩至原稿 1.5–2 倍' },
   { key: 'polish', label: '润色', icon: Sparkles, hint: '优化节奏、画面感与声韵' },
@@ -30,7 +34,7 @@ const ACTION_META = [
 ];
 
 /* 用量统计小方块 */
-function UsageStat({ value, label }) {
+function UsageStat({ value, label }: { value: string; label: string }) {
   return (
     <div style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)', borderRadius: 'var(--r-md)', padding: '14px 16px' }}>
       <div className="mono" style={{ fontSize: 19, fontWeight: 600, lineHeight: 1.15, color: 'var(--text)' }}>{value}</div>
@@ -46,18 +50,18 @@ export default function Settings() {
 
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState(null);
+  const [testResult, setTestResult] = useState<TestResult | null>(null);
 
   const [imgTesting, setImgTesting] = useState(false);
-  const [imgTestResult, setImgTestResult] = useState(null);
+  const [imgTestResult, setImgTestResult] = useState<ImageTestResult | null>(null);
 
-  const [models, setModels] = useState([]);
+  const [models, setModels] = useState<string[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
 
-  const [usage, setUsage] = useState(null);
+  const [usage, setUsage] = useState<UsageData | null>(null);
   const [usageLoading, setUsageLoading] = useState(true);
 
-  const [openAct, setOpenAct] = useState(null);
+  const [openAct, setOpenAct] = useState<AIActionKey | null>(null);
 
   /* 模型列表：随 provider 变化异步加载 */
   useEffect(() => {
@@ -79,7 +83,7 @@ export default function Settings() {
   }, []);
 
   /* 选择服务商：自动带入 baseUrl 与默认模型 */
-  const selectProvider = (p) => {
+  const selectProvider = (p: Provider) => {
     setTestResult(null);
     actions.setLLM({ provider: p.id, baseUrl: p.baseUrl, model: p.defaultModel, connected: false });
   };

@@ -5,7 +5,7 @@
    plot 数据与 actions，页面不直接改数据。
    动效：reveal + --d 错峰；图标仅用 lucide-react。
    ============================================================ */
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   GitBranch, Plus, Trash2, CheckCircle2, RotateCcw, ListChecks,
 } from 'lucide-react';
@@ -14,9 +14,10 @@ import {
   SectionHead, PageHead, Modal, EmptyState, ProgressRing,
 } from '../components/ui';
 import { useStore } from '../store/AppStore';
+import type { PlotNode } from '../types';
 
 /* 节拍类型 → Tag tone 分色 */
-const TYPE_TONE = {
+const TYPE_TONE: Record<string, string> = {
   引子: 't-primary',
   承: 't-gold',
   转: 't-warning',
@@ -25,15 +26,25 @@ const TYPE_TONE = {
 };
 
 /* 幕 phase → Tag tone（起 / 承 / 转·合 各取一色） */
-const PHASE_TONE = { 起: 't-primary', 承: 't-gold', '转 · 合': 't-danger' };
+const PHASE_TONE: Record<string, string> = { 起: 't-primary', 承: 't-gold', '转 · 合': 't-danger' };
 
 /* 可选的节拍类型 */
-const NODE_TYPES = ['引子', '承', '转', '高潮', '合'];
+const NODE_TYPES: string[] = ['引子', '承', '转', '高潮', '合'];
+
+interface PlotForm {
+  actId: string;
+  chapterNo: number;
+  type: string;
+  title: string;
+  summary: string;
+  conflict: string;
+  pov: string;
+}
 
 export default function Plot() {
   const { plot, actions } = useStore();
   const [modalOpen, setModalOpen] = useState(false);
-  const [form, setForm] = useState(null);
+  const [form, setForm] = useState<PlotForm | null>(null);
 
   const totalNodes = useMemo(
     () => plot.acts.reduce((s, a) => s + a.nodes.length, 0),
@@ -60,10 +71,11 @@ export default function Plot() {
     setModalOpen(true);
   };
 
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+  const set = <K extends keyof PlotForm>(k: K, v: PlotForm[K]) => setForm((f) => (f ? { ...f, [k]: v } : null));
 
   /* 新增节拍：校验所属幕与标题后写入 store */
   const submit = () => {
+    if (!form) return;
     if (!form.actId) {
       actions.toast('请选择所属幕', 'warning');
       return;
@@ -85,14 +97,14 @@ export default function Plot() {
   };
 
   /* 完成状态切换 */
-  const toggleStatus = (actId, node) => {
+  const toggleStatus = (actId: string, node: PlotNode) => {
     const next = node.status === 'done' ? 'draft' : 'done';
     actions.updatePlotNode(actId, node.id, { status: next });
     actions.toast(next === 'done' ? `「${node.title}」已标记完成` : `「${node.title}」恢复为草稿`);
   };
 
   /* 删除节点 */
-  const removeNode = (actId, node) => {
+  const removeNode = (actId: string, node: PlotNode) => {
     if (window.confirm(`确定删除节拍「${node.title}」？`)) {
       actions.removePlotNode(actId, node.id);
       actions.toast('已删除节拍', 'success');

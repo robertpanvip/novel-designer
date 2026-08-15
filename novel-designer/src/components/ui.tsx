@@ -2,11 +2,30 @@
    砚墨 · 小说设计器 — 共享 UI 组件
    页面仅通过这里的组件拼装界面，保持全局一致性。
    ============================================================ */
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
+import type {
+  ReactNode,
+  ButtonHTMLAttributes,
+  InputHTMLAttributes,
+  SelectHTMLAttributes,
+  TextareaHTMLAttributes,
+  HTMLAttributes,
+  CSSProperties,
+} from 'react';
+import type { LucideIcon } from 'lucide-react';
 import { X as XIcon, Check as CheckIcon } from 'lucide-react';
+import type { CustomCSS, Toast } from '../types';
 
 /* ---------- Button ---------- */
-export function Button({ variant = 'primary', size = 'md', icon: Icon, loading, children, className = '', ...rest }) {
+export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: 'primary' | 'outline' | 'ghost' | 'gold' | 'subtle';
+  size?: 'sm' | 'md' | 'lg';
+  icon?: LucideIcon;
+  loading?: boolean;
+  children?: ReactNode;
+}
+
+export function Button({ variant = 'primary', size = 'md', icon: Icon, loading, children, className = '', ...rest }: ButtonProps) {
   return (
     <button className={`btn btn-${variant} btn-${size} ${className}`} disabled={rest.disabled || loading} {...rest}>
       {loading ? (
@@ -21,7 +40,13 @@ export function Button({ variant = 'primary', size = 'md', icon: Icon, loading, 
   );
 }
 
-export function IconBtn({ icon: Icon, danger, label, ...rest }) {
+export interface IconBtnProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  icon: LucideIcon;
+  danger?: boolean;
+  label: string;
+}
+
+export function IconBtn({ icon: Icon, danger, label, ...rest }: IconBtnProps) {
   return (
     <button className={`icon-btn ${danger ? 'danger' : ''}`} title={label} aria-label={label} {...rest}>
       <Icon strokeWidth={1.8} size={17} />
@@ -30,7 +55,13 @@ export function IconBtn({ icon: Icon, danger, label, ...rest }) {
 }
 
 /* ---------- Form ---------- */
-export function Field({ label, hint, children }) {
+export interface FieldProps {
+  label?: string;
+  hint?: string;
+  children?: ReactNode;
+}
+
+export function Field({ label, hint, children }: FieldProps) {
   return (
     <div className="field">
       {label && <label>{label}</label>}
@@ -40,11 +71,11 @@ export function Field({ label, hint, children }) {
   );
 }
 
-export function Input({ className = '', ...rest }) {
+export function Input({ className = '', ...rest }: InputHTMLAttributes<HTMLInputElement>) {
   return <input className={`input ${className}`} {...rest} />;
 }
 
-export function Select({ className = '', children, ...rest }) {
+export function Select({ className = '', children, ...rest }: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select className={`select ${className}`} {...rest}>
       {children}
@@ -52,12 +83,17 @@ export function Select({ className = '', children, ...rest }) {
   );
 }
 
-export function Textarea({ className = '', ...rest }) {
+export function Textarea({ className = '', ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return <textarea className={`textarea ${className}`} {...rest} />;
 }
 
 /* ---------- Tag ---------- */
-export function Tag({ tone, children, ...rest }) {
+export interface TagProps extends HTMLAttributes<HTMLSpanElement> {
+  tone?: string;
+  children?: ReactNode;
+}
+
+export function Tag({ tone, children, ...rest }: TagProps) {
   return (
     <span className={`tag ${tone ? `t-${tone}` : ''}`} {...rest}>
       {children}
@@ -66,7 +102,12 @@ export function Tag({ tone, children, ...rest }) {
 }
 
 /* ---------- Card / Section ---------- */
-export function Card({ hoverable, className = '', children, ...rest }) {
+export interface CardProps extends HTMLAttributes<HTMLDivElement> {
+  hoverable?: boolean;
+  children?: ReactNode;
+}
+
+export function Card({ hoverable, className = '', children, ...rest }: CardProps) {
   return (
     <div className={`card ${hoverable ? 'hoverable' : ''} ${className}`} {...rest}>
       {children}
@@ -74,7 +115,13 @@ export function Card({ hoverable, className = '', children, ...rest }) {
   );
 }
 
-export function SectionHead({ title, sub, right }) {
+export interface SectionHeadProps {
+  title: ReactNode;
+  sub?: ReactNode;
+  right?: ReactNode;
+}
+
+export function SectionHead({ title, sub, right }: SectionHeadProps) {
   return (
     <div className="section-head">
       <div>
@@ -87,7 +134,14 @@ export function SectionHead({ title, sub, right }) {
 }
 
 /* ---------- Page header ---------- */
-export function PageHead({ title, accent, sub, actions }) {
+export interface PageHeadProps {
+  title: string;
+  accent?: string;
+  sub?: ReactNode;
+  actions?: ReactNode;
+}
+
+export function PageHead({ title, accent, sub, actions }: PageHeadProps) {
   return (
     <div className="page-head reveal">
       <div>
@@ -103,9 +157,18 @@ export function PageHead({ title, accent, sub, actions }) {
 }
 
 /* ---------- Stat card ---------- */
-export function StatCard({ icon: Icon, value, unit, label, trend, delay = 0 }) {
+export interface StatCardProps {
+  icon: LucideIcon;
+  value: ReactNode;
+  unit?: string;
+  label: ReactNode;
+  trend?: string;
+  delay?: number;
+}
+
+export function StatCard({ icon: Icon, value, unit, label, trend, delay = 0 }: StatCardProps) {
   return (
-    <Card className="stat-card reveal" style={{ ['--d']: `${delay}ms` }}>
+    <Card className="stat-card reveal" style={{ ['--d']: `${delay}ms` } as CustomCSS}>
       <div className="stat-ico">
         <Icon strokeWidth={1.8} />
       </div>
@@ -120,7 +183,14 @@ export function StatCard({ icon: Icon, value, unit, label, trend, delay = 0 }) {
 }
 
 /* ---------- Avatar (首字 + 渐变环) ---------- */
-export function Avatar({ name, color = '#E5533D', size, style }) {
+export interface AvatarProps {
+  name?: string;
+  color?: string;
+  size?: 'sm' | 'md' | 'lg';
+  style?: CSSProperties;
+}
+
+export function Avatar({ name, color = '#E5533D', size, style }: AvatarProps) {
   const cls = size === 'sm' ? 'avatar sm' : size === 'lg' ? 'avatar lg' : 'avatar';
   return (
     <span
@@ -133,10 +203,19 @@ export function Avatar({ name, color = '#E5533D', size, style }) {
 }
 
 /* ---------- Modal ---------- */
-export function Modal({ open, title, onClose, children, footer, width }) {
+export interface ModalProps {
+  open: boolean;
+  title: ReactNode;
+  onClose?: () => void;
+  children?: ReactNode;
+  footer?: ReactNode;
+  width?: number;
+}
+
+export function Modal({ open, title, onClose, children, footer, width }: ModalProps) {
   useEffect(() => {
     if (!open) return;
-    const onKey = (e) => e.key === 'Escape' && onClose?.();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose?.();
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
@@ -157,7 +236,14 @@ export function Modal({ open, title, onClose, children, footer, width }) {
 }
 
 /* ---------- Empty state ---------- */
-export function EmptyState({ icon: Icon, title, desc, action }) {
+export interface EmptyStateProps {
+  icon?: LucideIcon;
+  title: ReactNode;
+  desc?: ReactNode;
+  action?: ReactNode;
+}
+
+export function EmptyState({ icon: Icon, title, desc, action }: EmptyStateProps) {
   return (
     <div className="empty">
       <div className="empty-ico">
@@ -171,7 +257,17 @@ export function EmptyState({ icon: Icon, title, desc, action }) {
 }
 
 /* ---------- Slider ---------- */
-export function Slider({ label, value, min = 0, max = 1, step = 0.05, onChange, fmt }) {
+export interface SliderProps {
+  label: string;
+  value: number;
+  min?: number;
+  max?: number;
+  step?: number;
+  onChange?: (v: number) => void;
+  fmt?: (v: number) => string;
+}
+
+export function Slider({ label, value, min = 0, max = 1, step = 0.05, onChange, fmt }: SliderProps) {
   return (
     <div className="field">
       <div className="slider-row">
@@ -192,7 +288,15 @@ export function Slider({ label, value, min = 0, max = 1, step = 0.05, onChange, 
 }
 
 /* ---------- Progress ring ---------- */
-export function ProgressRing({ value, size = 84, stroke = 7, color = 'var(--primary)', label }) {
+export interface ProgressRingProps {
+  value: number;
+  size?: number;
+  stroke?: number;
+  color?: string;
+  label?: ReactNode;
+}
+
+export function ProgressRing({ value, size = 84, stroke = 7, color = 'var(--primary)', label }: ProgressRingProps) {
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const off = c - (Math.min(Math.max(value, 0), 100) / 100) * c;
@@ -218,7 +322,11 @@ export function ProgressRing({ value, size = 84, stroke = 7, color = 'var(--prim
 }
 
 /* ---------- Toaster ---------- */
-export function Toaster({ toasts }) {
+export interface ToasterProps {
+  toasts: Toast[];
+}
+
+export function Toaster({ toasts }: ToasterProps) {
   if (!toasts || toasts.length === 0) return null;
   return (
     <div className="toaster">

@@ -2,8 +2,8 @@
    砚墨 · 小说设计器 — App Shell（唯一骨架）
    所有页面都渲染在 <Outlet/> 中；导航仅在此定义一次。
    ============================================================ */
-import React from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard,
   PenLine,
@@ -18,7 +18,14 @@ import { useStore } from '../store/AppStore';
 import { Toaster } from '../components/ui';
 import { PROVIDERS } from '../api/llm';
 
-const NAV = [
+interface NavItem {
+  key: string;
+  to: string;
+  label: string;
+  icon: LucideIcon;
+}
+
+const NAV: NavItem[] = [
   { key: 'dashboard', to: '/dashboard', label: '工作台', icon: LayoutDashboard },
   { key: 'writer', to: '/writer', label: '创作台', icon: PenLine },
   { key: 'characters', to: '/characters', label: '角色库', icon: Users },
