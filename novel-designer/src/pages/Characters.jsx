@@ -5,8 +5,9 @@
    写操作均通过 AppStore actions（TODO: 接入真实后端时替换 actions 内部实现）
    ============================================================ */
 import React, { useMemo, useState } from 'react';
-import { Users, Plus, Pencil, Trash2, Network } from 'lucide-react';
+import { Users, Plus, Pencil, Trash2, Network, ImagePlus, RefreshCw } from 'lucide-react';
 import { useStore } from '../store/AppStore';
+import { characterImageUrl, generateCharacterImage } from '../api/image';
 import {
   PageHead,
   Button,
@@ -33,6 +34,7 @@ const EMPTY_FORM = {
   title: '',
   identity: '',
   personality: '',
+  appearance: '',
   tags: '',
   goals: '',
   arc: '',
@@ -198,74 +200,123 @@ function RelationGraph({ characters }) {
 
 /* ---------------- 角色卡片 ---------------- */
 function CharacterCard({ c, delay, onEdit, onDelete }) {
+  const { img, actions } = useStore();
+  const [variant, setVariant] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [imgErr, setImgErr] = useState(false);
+
+  /* 画像 URL：由「外貌锚点 + 统一风格 + seed」确定性生成，保证同一角色形象一致 */
+  const url = characterImageUrl({ config: img, character: c, variant });
+
+  /* 重新生成画像：变体仅改变姿态/构图，身份描述恒定（TODO: 接入真实后端，用参考图+seed 做 IMG2IMG） */
+  const regen = async (e) => {
+    e.stopPropagation();
+    if (loading) return;
+    setLoading(true);
+    setImgErr(false);
+    try {
+      const res = await generateCharacterImage({ config: img, character: c, variant: variant + 1 });
+      setVariant((v) => v + 1);
+      actions.setImg({ useCount: (img.useCount || 0) + 1 });
+      actions.toast(`已为「${c.name}」重新生成画像，形象保持一致`, 'success');
+    } catch {
+      actions.toast('画像生成失败，请检查「AI 配图」配置', 'danger');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <Card className="reveal" style={{ ['--d']: `${delay}ms`, padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* 头部：Avatar + 姓名 + 身份 */}
-      <div className="row" style={{ gap: 12, alignItems: 'center' }}>
-        <Avatar name={c.name} color={c.color} size="lg" />
-        <div style={{ minWidth: 0 }}>
-          <div className="display" style={{ fontSize: 18, fontWeight: 700 }}>{c.name}</div>
-          <div
-            className="sub"
-            style={{ fontSize: 12, color: 'var(--text-sub)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-          >
-            {c.title}
+    <Card className="reveal" style={{ ['--d']: `${delay}ms`, overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>
+      {/* AI 画像 */}
+      <div className={`portrait-frame ${loading ? 'loading' : ''}`}>
+        {imgErr ? (
+          <div style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center' }}>
+            <Avatar name={c.name} color={c.color} size="lg" />
+          </div>
+        ) : (
+          <img src={url} alt={`${c.name} 画像`} loading="lazy" onError={() => setImgErr(true)} />
+        )}
+        <button
+          className="img-chip"
+          style={{ position: 'absolute', right: 12, top: 12 }}
+          onClick={regen}
+          disabled={loading}
+          title="基于外貌锚点重新生成，保持形象一致"
+        >
+          {loading ? <RefreshCw className="spin" /> : <ImagePlus className="i" />}
+          <span>{loading ? '生成中' : 'AI 画像'}</span>
+        </button>
+      </div>
+
+      <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12, flex: 1 }}>
+        {/* 头部：Avatar + 姓名 + 身份 */}
+        <div className="row" style={{ gap: 12, alignItems: 'center' }}>
+          <Avatar name={c.name} color={c.color} size="lg" />
+          <div style={{ minWidth: 0 }}>
+            <div className="display" style={{ fontSize: 18, fontWeight: 700 }}>{c.name}</div>
+            <div
+              className="sub"
+              style={{ fontSize: 12, color: 'var(--text-sub)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            >
+              {c.title}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* 标签 */}
-      <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
-        {(c.tags || []).map((t, i) => (
-          <Tag key={t} tone={TAG_TONES[i % TAG_TONES.length]}>{t}</Tag>
-        ))}
-      </div>
-
-      {/* 性格（truncate 3 行） */}
-      <p
-        style={{
-          color: 'var(--text-sub)',
-          fontSize: 13,
-          lineHeight: 1.7,
-          display: '-webkit-box',
-          WebkitLineClamp: 3,
-          WebkitBoxOrient: 'vertical',
-          overflow: 'hidden',
-        }}
-      >
-        {c.personality}
-      </p>
-
-      {/* 目标（前两条，带圆点） */}
-      {(c.goals || []).slice(0, 2).map((g) => (
-        <div key={g} className="row" style={{ gap: 8, color: 'var(--text-sub)', fontSize: 13, alignItems: 'flex-start' }}>
-          <span style={{ color: 'var(--primary)', fontSize: 10, marginTop: 4 }}>●</span>
-          <span style={{ flex: 1 }}>{g}</span>
+        {/* 标签 */}
+        <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+          {(c.tags || []).map((t, i) => (
+            <Tag key={t} tone={TAG_TONES[i % TAG_TONES.length]}>{t}</Tag>
+          ))}
         </div>
-      ))}
 
-      {/* 关系 Tag 组（name·type） */}
-      <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
-        {(c.relations || []).map((r) => (
-          <Tag key={r.name} tone="t-gold">{r.name}·{r.type}</Tag>
-        ))}
-        {(!c.relations || c.relations.length === 0) && (
-          <span className="faint" style={{ fontSize: 12 }}>暂无档案关系</span>
-        )}
-      </div>
-
-      {/* 底部：弧光 + 操作 */}
-      <div className="row-between" style={{ marginTop: 'auto', paddingTop: 12, borderTop: '1px solid var(--border)' }}>
-        <span
-          className="mono"
-          style={{ fontSize: 11.5, color: 'var(--text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-          title={c.arc}
+        {/* 性格（truncate 3 行） */}
+        <p
+          style={{
+            color: 'var(--text-sub)',
+            fontSize: 13,
+            lineHeight: 1.7,
+            display: '-webkit-box',
+            WebkitLineClamp: 3,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}
         >
-          {c.arc || '弧光未设定'}
-        </span>
-        <div className="row" style={{ gap: 2 }}>
-          <IconBtn icon={Pencil} label={`编辑 ${c.name}`} onClick={() => onEdit(c)} />
-          <IconBtn icon={Trash2} danger label={`删除 ${c.name}`} onClick={() => onDelete(c)} />
+          {c.personality}
+        </p>
+
+        {/* 目标（前两条，带圆点） */}
+        {(c.goals || []).slice(0, 2).map((g) => (
+          <div key={g} className="row" style={{ gap: 8, color: 'var(--text-sub)', fontSize: 13, alignItems: 'flex-start' }}>
+            <span style={{ color: 'var(--primary)', fontSize: 10, marginTop: 4 }}>●</span>
+            <span style={{ flex: 1 }}>{g}</span>
+          </div>
+        ))}
+
+        {/* 关系 Tag 组（name·type） */}
+        <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+          {(c.relations || []).map((r) => (
+            <Tag key={r.name} tone="t-gold">{r.name}·{r.type}</Tag>
+          ))}
+          {(!c.relations || c.relations.length === 0) && (
+            <span className="faint" style={{ fontSize: 12 }}>暂无档案关系</span>
+          )}
+        </div>
+
+        {/* 底部：弧光 + 操作 */}
+        <div className="row-between" style={{ marginTop: 'auto', paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+          <span
+            className="mono"
+            style={{ fontSize: 11.5, color: 'var(--text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            title={c.arc}
+          >
+            {c.arc || '弧光未设定'}
+          </span>
+          <div className="row" style={{ gap: 2 }}>
+            <IconBtn icon={Pencil} label={`编辑 ${c.name}`} onClick={() => onEdit(c)} />
+            <IconBtn icon={Trash2} danger label={`删除 ${c.name}`} onClick={() => onDelete(c)} />
+          </div>
         </div>
       </div>
     </Card>
@@ -304,6 +355,7 @@ export default function Characters() {
       title: c.title || '',
       identity: c.identity || '',
       personality: c.personality || '',
+      appearance: c.appearance || '',
       tags: (c.tags || []).join(', '),
       goals: (c.goals || []).join('\n'),
       arc: c.arc || '',
@@ -327,6 +379,7 @@ export default function Characters() {
       title: form.title.trim(),
       identity: form.identity.trim(),
       personality: form.personality.trim(),
+      appearance: form.appearance.trim(),
       tags: form.tags.split(/[,，]/).map((s) => s.trim()).filter(Boolean),
       goals: form.goals.split('\n').map((s) => s.trim()).filter(Boolean),
       arc: form.arc.trim(),
@@ -474,6 +527,9 @@ export default function Characters() {
 
           {/* 右列：长文本 */}
           <div style={{ flex: 1, minWidth: 0 }}>
+            <Field label="外貌" hint="外貌描写是 AI 画像保持形象一致性的锚点">
+              <Textarea value={form.appearance} onChange={setField('appearance')} rows={2} placeholder="如：瘦高、深色风衣、左耳戴旧耳机…" />
+            </Field>
             <Field label="性格">
               <Textarea value={form.personality} onChange={setField('personality')} rows={3} placeholder="克制、敏锐、共情…" />
             </Field>

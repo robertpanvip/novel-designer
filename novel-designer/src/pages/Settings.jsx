@@ -9,7 +9,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Cpu, Eye, EyeOff, Plug, Save, RotateCcw, Check, ChevronDown,
   PenLine, Expand, Sparkles, RefreshCw, Lightbulb, ShieldCheck,
-  CheckCircle2, XCircle,
+  CheckCircle2, XCircle, Wand2,
 } from 'lucide-react';
 import {
   Button, IconBtn, Field, Input, Select, Textarea, Tag, Card,
@@ -17,6 +17,7 @@ import {
 } from '../components/ui';
 import { useStore } from '../store/AppStore';
 import { PROVIDERS, listModels, testConnection, fetchUsage } from '../api/llm';
+import { IMAGE_PROVIDERS, IMAGE_DEFAULT, testImageConnection, SIZE_POOL } from '../api/image';
 
 /* 六种创作能力的动作元信息（对应 llm.actions 的键） */
 const ACTION_META = [
@@ -39,12 +40,16 @@ function UsageStat({ value, label }) {
 }
 
 export default function Settings() {
-  const { llm, actions } = useStore();
+  const { llm, img, actions } = useStore();
   const currentProvider = PROVIDERS.find((p) => p.id === llm.provider);
+  const imgProvider = IMAGE_PROVIDERS.find((p) => p.id === img.provider);
 
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
+
+  const [imgTesting, setImgTesting] = useState(false);
+  const [imgTestResult, setImgTestResult] = useState(null);
 
   const [models, setModels] = useState([]);
   const [modelsLoading, setModelsLoading] = useState(false);
@@ -130,6 +135,40 @@ export default function Settings() {
       actions.toast('已恢复默认配置', 'success');
       setTimeout(() => window.location.reload(), 600);
     }
+  };
+
+  /* AI 配图：测试图片服务 */
+  const runImgTest = async () => {
+    setImgTesting(true);
+    setImgTestResult(null);
+    const res = await testImageConnection({
+      provider: img.provider,
+      baseUrl: img.baseUrl,
+      apiKey: img.apiKey,
+    });
+    setImgTesting(false);
+    if (res.ok) {
+      actions.setImg({ connected: true, lastTest: { at: new Date().toLocaleString('zh-CN', { hour12: false }), latency: res.latency } });
+      setImgTestResult(res);
+      actions.toast('配图服务可用', 'success');
+    } else {
+      actions.setImg({ connected: false });
+      setImgTestResult(res);
+      actions.toast(res.message || '配图服务测试失败', 'danger');
+    }
+  };
+
+  /* AI 配图：保存配置 */
+  const saveImgConfig = () => {
+    actions.saveImg({
+      provider: img.provider,
+      style: img.style.trim(),
+      size: img.size,
+      sceneSize: img.sceneSize,
+      seed: Number(img.seed) || IMAGE_DEFAULT.seed,
+      baseUrl: (img.baseUrl || '').trim(),
+      apiKey: img.apiKey || '',
+    });
   };
 
   const modelOptions = models.length ? models : currentProvider?.models || [];
@@ -308,8 +347,138 @@ export default function Settings() {
           </Field>
         </Card>
 
-        {/* ---- 5. 创作能力 Prompt 模板 ---- */}
+        {/* ---- 5. AI 配图配置（场景 / 人物） ---- */}
         <Card className="reveal" style={{ '--d': '200ms', padding: '20px 22px' }}>
+          <SectionHead
+            title="AI 配图 · 场景与人物"
+            sub="人物图以「外貌锚点 + 固定风格 + 每角色 seed」保持形象一致；场景图共享全局风格后缀保证整体统一"
+            right={
+              <Tag tone={img.connected ? 't-success' : undefined} style={{ gap: 6 }}>
+                <span
+                  style={{
+                    width: 7, height: 7, borderRadius: '50%', display: 'inline-block',
+                    background: img.connected ? 'var(--success)' : 'var(--text-faint)',
+                    boxShadow: img.connected ? '0 0 8px var(--success)' : 'none',
+                  }}
+                />
+                {img.connected ? '配图可用' : '未测试'}
+              </Tag>
+            }
+          />
+
+          {/* 配图服务商 */}
+          <Field label="图片生成服务商" hint="内置原型文生图端点无需 Key；自定义可接入任意兼容接口">
+            <div className="grid grid-3" style={{ gap: 10 }}>
+              {IMAGE_PROVIDERS.map((p) => {
+                const sel = p.id === img.provider;
+                return (
+                  <Card
+                    key={p.id}
+                    hoverable
+                    onClick={() => {
+                      setImgTestResult(null);
+                      actions.setImg({ provider: p.id, baseUrl: p.defaultBase, connected: false });
+                    }}
+                    style={{
+                      padding: '12px 14px', cursor: 'pointer',
+                      borderColor: sel ? 'var(--primary)' : undefined,
+                      boxShadow: sel ? '0 0 0 1px var(--primary)' : undefined,
+                    }}
+                  >
+                    <div className="row-between" style={{ gap: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700 }}>{p.name}</span>
+                      {sel && <Check size={15} style={{ color: 'var(--primary)', flex: 'none' }} />}
+                    </div>
+                    <div className="sub" style={{ fontSize: 11.5, marginTop: 5 }}>{p.desc}</div>
+                  </Card>
+                );
+              })}
+            </div>
+          </Field>
+
+          {(imgProvider?.needsKey || img.baseUrl) && (
+            <Field label="Base URL" hint="图片服务接口根地址（自定义服务商时填写）">
+              <Input
+                value={img.baseUrl}
+                onChange={(e) => actions.setImg({ baseUrl: e.target.value })}
+                placeholder="https://…"
+              />
+            </Field>
+          )}
+          {imgProvider?.needsKey && (
+            <Field label="API Key" hint="仅保存在本机 localStorage，用于配图服务鉴权">
+              <Input
+                className="grow"
+                type="password"
+                value={img.apiKey}
+                onChange={(e) => actions.setImg({ apiKey: e.target.value })}
+                placeholder="sk-…"
+                autoComplete="off"
+              />
+            </Field>
+          )}
+
+          <Field label="全局风格" hint="所有场景与人物图共享的视觉风格后缀，是画面「连贯性」的核心，建议保留默认并微调">
+            <Textarea rows={2} value={img.style} onChange={(e) => actions.setImg({ style: e.target.value })} />
+          </Field>
+
+          <div className="grid grid-2" style={{ gap: 14 }}>
+            <Field label="人物图尺寸">
+              <Select value={img.size} onChange={(e) => actions.setImg({ size: e.target.value })}>
+                {SIZE_POOL.map((s) => <option key={s} value={s}>{s}</option>)}
+              </Select>
+            </Field>
+            <Field label="场景图尺寸">
+              <Select value={img.sceneSize} onChange={(e) => actions.setImg({ sceneSize: e.target.value })}>
+                {SIZE_POOL.map((s) => <option key={s} value={s}>{s}</option>)}
+              </Select>
+            </Field>
+          </div>
+
+          <Field label="全局 Seed" hint="种子基准值，与角色/场景 ID 派生，保证重新生成时画面稳定连贯">
+            <Input
+              type="number" min={0} step={1}
+              value={img.seed}
+              onChange={(e) => actions.setImg({ seed: Number(e.target.value) || IMAGE_DEFAULT.seed })}
+            />
+          </Field>
+
+          <div className="row-between" style={{ marginTop: 4 }}>
+            <div className="row" style={{ gap: 10 }}>
+              <Button variant="outline" icon={Wand2} loading={imgTesting} onClick={runImgTest}>测试配图服务</Button>
+              {img.lastTest && !imgTesting && (
+                <span className="mono" style={{ fontSize: 11, color: 'var(--text-faint)' }}>
+                  上次测试：{img.lastTest.at} · {img.lastTest.latency}ms
+                </span>
+              )}
+            </div>
+            <Button variant="outline" size="sm" icon={Save} onClick={saveImgConfig}>保存配图配置</Button>
+          </div>
+
+          {/* 配图测试结果 */}
+          {imgTestResult && (
+            imgTestResult.ok ? (
+              <div style={{ marginTop: 14, background: 'var(--success-soft)', border: '1px solid rgba(76,175,125,0.4)', borderRadius: 'var(--r-md)', padding: '12px 14px' }}>
+                <div className="row" style={{ color: '#6fd69e', gap: 7 }}>
+                  <CheckCircle2 size={16} />
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>配图服务可用 · {imgTestResult.latency}ms</span>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-sub)', marginTop: 5 }}>{imgTestResult.message}</div>
+              </div>
+            ) : (
+              <div style={{ marginTop: 14, background: 'var(--danger-soft)', border: '1px solid rgba(229,83,61,0.4)', borderRadius: 'var(--r-md)', padding: '12px 14px' }}>
+                <div className="row" style={{ color: '#f27a66', gap: 7 }}>
+                  <XCircle size={16} />
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>配图服务不可用</span>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-sub)', marginTop: 5 }}>{imgTestResult.message}</div>
+              </div>
+            )
+          )}
+        </Card>
+
+        {/* ---- 6. 创作能力 Prompt 模板 ---- */}
+        <Card className="reveal" style={{ '--d': '240ms', padding: '20px 22px' }}>
           <SectionHead title="创作能力 Prompt 模板" sub="六种 AI 创作能力的提示词模板，点击展开可编辑，保存时一并写入配置" />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {ACTION_META.map((m) => {

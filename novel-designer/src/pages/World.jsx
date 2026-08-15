@@ -5,8 +5,9 @@
    写操作均通过 AppStore actions（TODO: 接入真实后端时替换 actions 内部实现）
    ============================================================ */
 import React, { useMemo, useState } from 'react';
-import { Globe2, Plus, Trash2, MapPin, History, Building2, ScrollText } from 'lucide-react';
+import { Globe2, Plus, Trash2, MapPin, History, Building2, ScrollText, ImagePlus, RefreshCw } from 'lucide-react';
 import { useStore } from '../store/AppStore';
+import { sceneImageUrl, generateSceneImage } from '../api/image';
 import {
   PageHead,
   Button,
@@ -26,14 +27,62 @@ import {
 /* 分类 → 图标映射（未命中时回退地球图标） */
 const SECTION_ICONS = { 地理: MapPin, 历史: History, 势力: Building2, 规则: ScrollText };
 
+/* ---------------- 场景配图横幅 ----------------
+   统一风格来自「AI 配图」配置(config.style)，保证各场景美术风格一致；
+   变体仅改变构图/机位，不改变主题描述。 */
+function SceneBanner({ s, img, actions, variant, onRegen }) {
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState(false);
+  const url = sceneImageUrl({ config: img, scene: s, variant });
+
+  const regen = async () => {
+    if (loading) return;
+    setLoading(true);
+    setErr(false);
+    try {
+      // TODO: 接入真实后端 —— 以统一风格 + seed 调用真实文生图接口
+      await generateSceneImage({ config: img, scene: s, variant: variant + 1 });
+      onRegen();
+      actions.setImg({ useCount: (img.useCount || 0) + 1 });
+      actions.toast(`已为「${s.type} · ${s.title}」重新生成场景图，保持统一风格`, 'success');
+    } catch {
+      actions.toast('场景图生成失败，请检查「AI 配图」配置', 'danger');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className={`scene-banner ${loading ? 'loading' : ''}`} style={{ marginBottom: 18 }}>
+      {err ? (
+        <div style={{ width: '100%', height: '100%', display: 'grid', placeItems: 'center' }}>
+          <span className="faint" style={{ fontSize: 13 }}>场景图加载失败</span>
+        </div>
+      ) : (
+        <img src={url} alt={`${s.type} · ${s.title} 场景图`} loading="lazy" onError={() => setErr(true)} />
+      )}
+      <div className="scene-cap">
+        <span className="scene-title">{s.type} · {s.title}</span>
+        <button className="img-chip" onClick={regen} disabled={loading} title="按统一风格重新生成场景配图">
+          {loading ? <RefreshCw className="spin" /> : <ImagePlus className="i" />}
+          <span>{loading ? '生成中' : 'AI 配图'}</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- 页面 ---------------- */
 export default function World() {
-  const { world, actions } = useStore();
+  const { world, img, actions } = useStore();
   const { toast } = actions;
   const [modalOpen, setModalOpen] = useState(false);
   const [sectionId, setSectionId] = useState(world.sections[0]?.id || '');
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
+  /* 每个分类的配图变体序号（仅变构图，风格统一） */
+  const [variants, setVariants] = useState({});
+  const bumpVariant = (id) => setVariants((v) => ({ ...v, [id]: (v[id] || 0) + 1 }));
 
   /* 打开新增条目 Modal（可选预选分类） */
   const openAdd = (sid) => {
@@ -122,6 +171,14 @@ export default function World() {
       <div className="grid grid-2">
         {world.sections.map((s, i) => (
           <Card key={s.id} className="reveal" style={{ ['--d']: `${120 + i * 60}ms`, padding: '20px 22px' }}>
+            {/* 场景配图：统一风格 + 变体重生成 */}
+            <SceneBanner
+              s={s}
+              img={img}
+              actions={actions}
+              variant={variants[s.id] || 0}
+              onRegen={() => bumpVariant(s.id)}
+            />
             <SectionHead
               title={`${s.type} · ${s.title}`}
               sub={s.desc}

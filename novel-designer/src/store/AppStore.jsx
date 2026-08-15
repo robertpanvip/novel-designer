@@ -7,11 +7,13 @@
    ============================================================ */
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { PROJECT, CHAPTERS, CHARACTERS, WORLD, PLOT, LLM_DEFAULT } from '../mock/data';
+import { IMAGE_DEFAULT } from '../api/image';
 
 const StoreCtx = createContext(null);
 
 const LS_LLM = 'yanmo-llm';
 const LS_CHAPTERS = 'yanmo-chapters';
+const LS_IMG = 'yanmo-img';
 
 function loadLS(key, fallback) {
   try {
@@ -30,6 +32,7 @@ export function AppStoreProvider({ children }) {
   const [world, setWorld] = useState(WORLD);
   const [plot, setPlot] = useState(PLOT);
   const [llm, setLlm] = useState(() => loadLS(LS_LLM, LLM_DEFAULT));
+  const [img, setImgCfg] = useState(() => loadLS(LS_IMG, IMAGE_DEFAULT));
   const [toasts, setToasts] = useState([]);
 
   useEffect(() => {
@@ -47,6 +50,14 @@ export function AppStoreProvider({ children }) {
       /* ignore */
     }
   }, [chapters]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_IMG, JSON.stringify(img));
+    } catch {
+      /* ignore */
+    }
+  }, [img]);
 
   const toast = (msg, type = 'default') => {
     const id = Date.now() + Math.random();
@@ -138,6 +149,13 @@ export function AppStoreProvider({ children }) {
     toast('配置已保存', 'success');
   };
 
+  /* ---------- img (场景/人物配图) ---------- */
+  const setImg = (patch) => setImgCfg((l) => ({ ...l, ...patch }));
+  const saveImg = (patch) => {
+    setImgCfg((l) => ({ ...l, ...patch }));
+    toast('配图配置已保存', 'success');
+  };
+
   const value = useMemo(
     () => ({
       project,
@@ -146,6 +164,7 @@ export function AppStoreProvider({ children }) {
       world,
       plot,
       llm,
+      img,
       toasts,
       actions: {
         toast,
@@ -162,9 +181,11 @@ export function AppStoreProvider({ children }) {
         removePlotNode,
         setLLM,
         saveLLM,
+        setImg,
+        saveImg,
       },
     }),
-    [project, chapters, characters, world, plot, llm, toasts],
+    [project, chapters, characters, world, plot, llm, img, toasts],
   );
 
   return <StoreCtx.Provider value={value}>{children}</StoreCtx.Provider>;
