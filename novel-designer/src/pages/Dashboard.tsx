@@ -113,8 +113,27 @@ export default function Dashboard() {
       const beatCtx = `第${u.node.chapterNo}章（${u.node.type}）「${u.node.title}」：${u.node.summary || '无摘要'}${
         u.node.conflict ? `。核心冲突：${u.node.conflict}` : ''
       }。POV：${u.node.pov || '未指定'}。本拍属于${u.act.name}。`;
-      // 上一章结尾，供衔接文风
-      const prevTail = (chapters[chapters.length - 1]?.content || '').slice(-800);
+      // 已写章节按章节号排序（防乱序）
+      const written = chapters
+        .filter((c) => c.content.trim())
+        .slice()
+        .sort((a, b) => a.no - b.no);
+      // 前情提要：本章之前所有已完成章节的标题+摘要，让模型知道"之前发生了什么"
+      const before = written.filter((c) => c.no < u.node.chapterNo);
+      const recapCtx = before
+        .map((c) => {
+          const brief = (c.summary || c.content).trim().replace(/\s+/g, ' ').slice(0, 60);
+          return `第${c.no}章 ${c.title}：${brief}`;
+        })
+        .join('\n');
+      // 真正的"上一章"：章节号紧邻本章且已有正文的那一章（而非列表最后一章）
+      const prev = before[before.length - 1] ?? written[written.length - 1];
+      const prevEnding = prev && prev.no < u.node.chapterNo ? prev.content.slice(-1400) : '';
+      // 下一章节拍：结尾钩子的指向
+      const next = undone.find((x) => x.node.chapterNo > u.node.chapterNo);
+      const nextBeatCtx = next
+        ? `第${next.node.chapterNo}章（${next.node.type}）「${next.node.title}」：${next.node.summary || '无摘要'}`
+        : '';
       await runAI({
         action: 'draft',
         context: {
@@ -122,9 +141,11 @@ export default function Dashboard() {
           char: u.node.pov || undefined,
           genre: project.genre,
           world: worldCtx || undefined,
+          recap: recapCtx || undefined,
           plot: plotCtx || undefined,
           beat: beatCtx,
-          content: prevTail || undefined,
+          prevEnding: prevEnding || undefined,
+          nextBeat: nextBeatCtx || undefined,
         },
         onDelta: (t) => {
           genRef.current += t;
@@ -297,7 +318,7 @@ export default function Dashboard() {
           <Card className="reveal" style={{ '--d': '300ms', padding: 20 }}>
             <SectionHead
               title="AI 一键成稿"
-              sub="依据世界观设定与情节大纲，为待写节拍生成整章初稿"
+              sub="依据世界观、前情提要与情节大纲生成整章初稿，自动衔接上一章结尾"
               right={<Tag tone="t-gold">{undone.length} 拍待写</Tag>}
             />
             {undone.length === 0 ? (

@@ -67,11 +67,13 @@ const ACTION_LABEL: Record<AIAction, string> = {
 
 /* 各动作的兜底提示词（用户配置里没有对应模板时使用） */
 const DEFAULT_PROMPTS: Partial<Record<AIAction, string>> = {
-  draft: `【一键成稿】你是这部小说的作者。请依据下方给出的「世界观设定」与「情节大纲」，为「本章要写的节拍」创作一章正文初稿（1200–2000 字）。
+  draft: `【一键成稿】你是这部小说的作者。请依据下方给出的「世界观设定」「前情提要」与「情节大纲」，为「本章要写的节拍」创作一章正文初稿（1200–2000 字）。
 要求：
+- 开篇必须无缝衔接「上一章结尾原文」的场景、时间与情绪，像同一支笔不间断地写下去；禁止重复交代前文已知信息，禁止凭空跳时间、跳场景。
+- 人物言行必须与「前情提要」中已建立的状态一致，沿用已出现的人物称呼与说话方式。
 - 延续已有正文的文风、叙事视角与节奏（若有）。
 - 严格在世界观设定范围内写作，落实本拍的核心冲突。
-- 结尾留出向下一拍推进的钩子。
+- 结尾必须为「下一章节拍」埋下明确的钩子，让读者想立刻读下一章。
 - 直接输出正文，不要标题、不要任何解释说明。`,
 };
 
@@ -83,10 +85,19 @@ function buildUserPrompt(cfg: LLMConfig, action: AIAction, ctx: Record<string, u
   if (ctx.char) ctxLines.push(`主要视角人物：${str(ctx.char)}`);
   if (ctx.genre) ctxLines.push(`作品类型：${str(ctx.genre)}`);
   if (ctx.world) ctxLines.push(`\n世界观设定：\n${String(ctx.world).slice(0, 3000)}`);
+  if (ctx.recap) ctxLines.push(`\n前情提要（按章节顺序，人物与事件以此为准）：\n${String(ctx.recap).slice(0, 2000)}`);
   if (ctx.plot) ctxLines.push(`\n情节大纲：\n${String(ctx.plot).slice(0, 2200)}`);
+  if (ctx.prevEnding) ctxLines.push(`\n上一章结尾原文（新章开头必须无缝衔接此场景）：\n…${String(ctx.prevEnding).slice(-1400)}`);
+  if (ctx.nextBeat) ctxLines.push(`\n下一章节拍（本章结尾为其埋钩子）：${str(ctx.nextBeat)}`);
   if (ctx.beat) ctxLines.push(`\n本章要写的节拍：${str(ctx.beat)}`);
   if (ctx.content) ctxLines.push(`\n已有正文（本章之前，供衔接文风）：\n${String(ctx.content).slice(-3000)}`);
   if (ctxLines.length) parts.push(`\n---\n${ctxLines.join('\n')}`);
+  /* 成稿动作的衔接铁律——无论用户自定义模板写了什么都追加，保证章节连贯 */
+  if (action === 'draft') {
+    parts.push(
+      `\n---\n衔接铁律（必须遵守）：\n1. 若给出「上一章结尾原文」，本章第一段必须从该场景、该时间点、该情绪直接续写，不允许重开场景或复述前情。\n2. 若给出「前情提要」，人物关系、称谓、已发生事件必须完全一致，不得出现与提要矛盾的描写。\n3. 若给出「下一章节拍」，最后一段必须向它收束并留钩子。`,
+    );
+  }
   return parts.join('\n');
 }
 
