@@ -2,3 +2,10 @@ node_modules
 dist
 .DS_Store
 *.local
+
+# 后端 SQLite 数据文件（首次启动自动重建并灌种子）
+server/data/
+
+# IDE / 临时产物
+.idea/
+vite.config.ts.timestamp-*.mjs

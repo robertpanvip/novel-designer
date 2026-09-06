@@ -55,6 +55,41 @@ export interface Project {
   updatedAt: string;
 }
 
+/** 一键改名（全文替换）各数据域的命中行数 */
+export interface RenameResult {
+  chapters: number;
+  characters: number;
+  world: number;
+  plot: number;
+  timeline: number;
+}
+
+/** AI 从长文本提炼出的世界观分区（导入前预览） */
+export interface WorldImportSection {
+  type: string;
+  title: string;
+  desc: string;
+  items: { title: string; desc: string }[];
+}
+
+/** 世界观导入结果统计 */
+export interface WorldImportResult {
+  sectionsCreated: number;
+  itemsAdded: number;
+  itemsSkipped: number;
+}
+
+/** 书籍切换器用的轻量条目 */
+export interface ProjectMeta {
+  id: string;
+  title: string;
+  genre: string | null;
+  cover: string;
+  updatedAt: string;
+  chapterCount: number;
+  charCount: number;
+}
+
 /* ---------------- 章节 ---------------- */
 
 export type ChapterStatus = 'done' | 'revising' | 'draft';
@@ -159,14 +194,15 @@ export interface PlotData {
 
 /* ---------------- 大模型（LLM） ---------------- */
 
-/** 六种 AI 创作能力 */
+/** 六种 AI 创作能力 + 一键成稿 */
 export type AIActionKey =
   | 'continue'
   | 'expand'
   | 'polish'
   | 'rewrite'
   | 'brainstorm'
-  | 'consistency';
+  | 'consistency'
+  | 'draft';
 
 export interface Provider {
   id: string;
@@ -244,6 +280,15 @@ export interface GeneratedImage {
 
 export interface StoreActions {
   toast: (msg: string, type?: ToastType) => void;
+  updateProject: (patch: Partial<Project>) => void;
+  /** 新建作品并切换过去 */
+  createBook: (title: string) => Promise<void>;
+  /** 切换当前作品 */
+  switchBook: (id: string) => Promise<void>;
+  /** 删除作品（最后一本不可删） */
+  removeBook: (id: string) => Promise<void>;
+  /** 一键改名：活动作品内全文替换旧名 → 新名，返回是否成功（统计经 toast 提示） */
+  renameCharacter: (from: string, to: string) => Promise<boolean>;
   updateChapter: (id: string, patch: Partial<Chapter>) => void;
   insertChapter: (patch: Partial<Chapter>) => void;
   removeChapter: (id: string) => void;
@@ -252,8 +297,14 @@ export interface StoreActions {
   removeCharacter: (id: string) => void;
   addWorldItem: (sectionId: string, item: WorldItemInput) => void;
   removeWorldItem: (sectionId: string, itemId: string) => void;
+  /** 编辑分区（分类名/标题/概述） */
+  updateWorldSection: (sectionId: string, patch: { type?: string; title?: string; desc?: string }) => void;
+  /** 编辑条目（标题/描述） */
+  updateWorldItem: (sectionId: string, itemId: string, patch: { title?: string; desc?: string }) => void;
+  /** 批量导入 AI 提炼的世界观分区（按 type 合并、同名条目去重） */
+  importWorld: (sections: WorldImportSection[]) => Promise<void>;
   addPlotNode: (actId: string, node: PlotNodeInput) => void;
-  updatePlotNode: (actId: string, nodeId: string, patch: Partial<PlotNode>) => void;
+  updatePlotNode: (actId: string, nodeId: string, patch: Partial<PlotNode> & { actId?: string }) => void;
   removePlotNode: (actId: string, nodeId: string) => void;
   setLLM: (patch: Partial<LLMConfig>) => void;
   saveLLM: (patch: Partial<LLMConfig>) => void;
@@ -262,7 +313,11 @@ export interface StoreActions {
 }
 
 export interface StoreValue {
+  /** 后端是否可用；false 时写操作仅落 localStorage */
+  apiOnline: boolean;
   project: Project;
+  /** 全部作品（书籍切换器数据源） */
+  projects: ProjectMeta[];
   chapters: Chapter[];
   characters: Character[];
   world: WorldData;

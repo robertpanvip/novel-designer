@@ -3,7 +3,7 @@
    数据统一从 useStore 读取；今日灵感走 api 存根。
    TODO: 接入真实后端 —— 替换 runAI 存根为真实接口调用
    ============================================================ */
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   FileText,
@@ -17,6 +17,9 @@ import {
   GitBranch,
   ChevronRight,
   BookOpen,
+  Wand2,
+  Info,
+  CheckCircle2,
 } from 'lucide-react';
 import {
   PageHead,
@@ -27,10 +30,12 @@ import {
   Button,
   ProgressRing,
   EmptyState,
+  Select,
+  Modal,
 } from '../components/ui';
 import { useStore } from '../store/AppStore';
 import { runAI } from '../api/llm';
-import type { ChapterStatus } from '../types';
+import type { ChapterStatus, PlotAct, PlotNode } from '../types';
 
 // 章节状态 → 文案 / Tag tone
 const STATUS_META: Record<ChapterStatus, { label: string; tone: string }> = {
@@ -43,7 +48,7 @@ const STATUS_META: Record<ChapterStatus, { label: string; tone: string }> = {
 const DEFAULT_INSPIRATION = `《雾港潮生》的线索正从「岸上」转向「雾中」。不妨让陆昭在重听那晚电台录音时，发现一段被剪掉的空白——停顿的三秒里，有人轻轻敲了两下麦克风。那声音像极了船笛：两声，是求救，也是认门。让林雾那句「界碑下面压着的东西，比沉船还沉」，与沈樱《雾岸》展览里的物证照片第一次正面碰撞。真正的钩子，不妨藏在一张被海水泡皱的旧登船牌上——船牌的主人，已经三十年没有露面了。`;
 
 export default function Dashboard() {
-  const { project, chapters, actions } = useStore();
+  const { project, chapters, world, plot, actions } = useStore();
   const navigate = useNavigate();
 
   // 封面图加载失败 → 占位
@@ -59,6 +64,106 @@ export default function Dashboard() {
   const doneRatio = chapters.length ? Math.round((doneCount / chapters.length) * 100) : 0;
 
   const recent = chapters.slice(0, 5);
+
+  /* ---------- AI 一键成稿 ---------- */
+  // 待写节拍（未完成，按章节号排序）
+  const undone = useMemo(
+    () =>
+      plot.acts
+        .flatMap((a) => a.nodes.filter((n) => n.status !== 'done').map((n) => ({ act: a, node: n })))
+        .sort((x, y) => x.node.chapterNo - y.node.chapterNo),
+    [plot.acts],
+  );
+  const [beatId, setBeatId] = useState('');
+  const picked = undone.find((u) => u.node.id === beatId) ?? undone[0];
+
+  const [genOpen, setGenOpen] = useState(false);
+  const [genBusy, setGenBusy] = useState(false);
+  const [genText, setGenText] = useState('');
+  const genRef = useRef('');
+  const [genMeta, setGenMeta] = useState<{ source?: string; error?: string | null } | null>(null);
+
+  const doGenerate = async (u: { act: PlotAct; node: PlotNode }) => {
+    setGenBusy(true);
+    setGenText('');
+    genRef.current = '';
+    setGenMeta(null);
+    try {
+      // 世界观上下文：分区 + 条目（截断防爆 token）
+      const worldCtx = world.sections
+        .map(
+          (s) =>
+            `【${s.type} · ${s.title}】${s.desc}\n${s.items
+              .slice(0, 8)
+              .map((i) => `- ${i.title}：${i.desc}`)
+              .join('\n')}`,
+        )
+        .join('\n\n')
+        .slice(0, 3000);
+      // 情节大纲上下文：三幕 + 全部节拍
+      const plotCtx = plot.acts
+        .map(
+          (a) =>
+            `== ${a.name}（${a.phase}）==\n${a.nodes
+              .map((n) => `第${n.chapterNo}章[${n.type}]${n.title}：${n.summary || ''}${n.status === 'done' ? '（已完成）' : ''}`)
+              .join('\n')}`,
+        )
+        .join('\n')
+        .slice(0, 2200);
+      const beatCtx = `第${u.node.chapterNo}章（${u.node.type}）「${u.node.title}」：${u.node.summary || '无摘要'}${
+        u.node.conflict ? `。核心冲突：${u.node.conflict}` : ''
+      }。POV：${u.node.pov || '未指定'}。本拍属于${u.act.name}。`;
+      // 上一章结尾，供衔接文风
+      const prevTail = (chapters[chapters.length - 1]?.content || '').slice(-800);
+      await runAI({
+        action: 'draft',
+        context: {
+          title: `第${u.node.chapterNo}章 ${u.node.title}`,
+          char: u.node.pov || undefined,
+          genre: project.genre,
+          world: worldCtx || undefined,
+          plot: plotCtx || undefined,
+          beat: beatCtx,
+          content: prevTail || undefined,
+        },
+        onDelta: (t) => {
+          genRef.current += t;
+          setGenText(genRef.current);
+        },
+        onMeta: (m) => setGenMeta(m ?? null),
+      });
+    } catch {
+      actions.toast('生成失败：后端未连接或大模型调用出错', 'danger');
+      setGenOpen(false);
+    } finally {
+      setGenBusy(false);
+    }
+  };
+
+  const openGenerate = () => {
+    if (!picked) return;
+    setGenOpen(true);
+    void doGenerate(picked);
+  };
+
+  const regenerate = () => {
+    if (!picked) return;
+    void doGenerate(picked);
+  };
+
+  const saveDraft = () => {
+    if (!picked || !genText.trim()) return;
+    const text = genText.trim();
+    actions.insertChapter({
+      title: `第${picked.node.chapterNo}章 ${picked.node.title}`,
+      content: text,
+      summary: picked.node.summary || '',
+      wordCount: text.length,
+    });
+    actions.toast('已保存为章节草稿，去创作台继续打磨', 'success');
+    setGenOpen(false);
+    navigate('/writer');
+  };
 
   // 新建章节：写入 store 并 toast 提示
   const handleNewChapter = () => {
@@ -188,6 +293,49 @@ export default function Dashboard() {
             </div>
           </Card>
 
+          {/* ===== AI 一键成稿 ===== */}
+          <Card className="reveal" style={{ '--d': '300ms', padding: 20 }}>
+            <SectionHead
+              title="AI 一键成稿"
+              sub="依据世界观设定与情节大纲，为待写节拍生成整章初稿"
+              right={<Tag tone="t-gold">{undone.length} 拍待写</Tag>}
+            />
+            {undone.length === 0 ? (
+              <EmptyState
+                icon={CheckCircle2}
+                title="所有节拍都已完成"
+                desc="去情节大纲添加新节拍，或补齐世界观设定后继续创作。"
+                action={
+                  <Button variant="outline" size="sm" icon={GitBranch} onClick={() => navigate('/plot')}>
+                    去情节大纲
+                  </Button>
+                }
+              />
+            ) : (
+              <div className="row-between" style={{ flexWrap: 'wrap', gap: 12 }}>
+                <div className="row" style={{ gap: 10, minWidth: 0, flexWrap: 'wrap' }}>
+                  <Select
+                    value={picked?.node.id ?? ''}
+                    onChange={(e) => setBeatId(e.target.value)}
+                    style={{ width: 320, maxWidth: '100%' }}
+                  >
+                    {undone.map((u) => (
+                      <option key={u.node.id} value={u.node.id}>
+                        第{u.node.chapterNo}章 [{u.node.type}] {u.node.title} · {u.act.name}
+                      </option>
+                    ))}
+                  </Select>
+                  <span className="faint" style={{ fontSize: 12 }}>
+                    POV · {picked?.node.pov || '未指定'}
+                  </span>
+                </div>
+                <Button variant="gold" icon={Wand2} loading={genBusy} onClick={openGenerate}>
+                  生成本章草稿
+                </Button>
+              </div>
+            )}
+          </Card>
+
           {/* ===== 最近章节 ===== */}
           <Card className="reveal" style={{ '--d': '320ms', padding: 20 }}>
             <SectionHead
@@ -304,6 +452,67 @@ export default function Dashboard() {
           </div>
         </Card>
       </div>
+
+      {/* ---- AI 一键成稿 Modal ---- */}
+      <Modal
+        open={genOpen}
+        title={picked ? `AI 成稿 · 第${picked.node.chapterNo}章 ${picked.node.title}` : 'AI 成稿'}
+        onClose={() => !genBusy && setGenOpen(false)}
+        width={720}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setGenOpen(false)} disabled={genBusy}>
+              {genText ? '丢弃' : '取消'}
+            </Button>
+            <Button variant="ghost" icon={RefreshCw} loading={genBusy} onClick={regenerate}>
+              重新生成
+            </Button>
+            <Button variant="primary" icon={CheckCircle2} disabled={genBusy || !genText.trim()} onClick={saveDraft}>
+              存为章节
+            </Button>
+          </>
+        }
+      >
+        {genText ? (
+          <div style={{ maxHeight: 440, overflowY: 'auto', paddingRight: 4 }}>
+            <p style={{ fontSize: 13.5, lineHeight: 1.9, whiteSpace: 'pre-wrap', color: 'var(--text)' }}>{genText}</p>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: 8 }}>
+            <div className="skeleton" style={{ height: 13, width: '100%' }} />
+            <div className="skeleton" style={{ height: 13, width: '94%' }} />
+            <div className="skeleton" style={{ height: 13, width: '88%' }} />
+            <div className="skeleton" style={{ height: 13, width: '96%' }} />
+            <div className="skeleton" style={{ height: 13, width: '72%' }} />
+            <div className="sub" style={{ fontSize: 12.5, marginTop: 8 }}>
+              正在依据世界观（{world.sections.length} 个分区）与情节大纲（
+              {plot.acts.reduce((s, a) => s + a.nodes.length, 0)} 拍）生成草稿，约需 1~2 分钟…
+            </div>
+          </div>
+        )}
+        {genText && genMeta?.source === 'canned' && (
+          <div
+            className="row"
+            style={{ gap: 8, marginTop: 12, padding: '8px 12px', background: 'var(--bg-raised)', borderRadius: 'var(--r-md)', border: '1px solid var(--border)' }}
+          >
+            <Info size={14} style={{ color: 'var(--gold)', flex: 'none' }} />
+            <span className="sub" style={{ fontSize: 12 }}>
+              当前未配置大模型，以上为内置占位文案；到「设置」配置后可获得真实成稿。
+            </span>
+          </div>
+        )}
+        {genText && genMeta?.error && (
+          <div
+            className="row"
+            style={{ gap: 8, marginTop: 12, padding: '8px 12px', background: 'var(--bg-raised)', borderRadius: 'var(--r-md)', border: '1px solid var(--border)' }}
+          >
+            <Info size={14} style={{ color: 'var(--danger, #e5484d)', flex: 'none' }} />
+            <span className="sub" style={{ fontSize: 12 }}>
+              上游返回异常（已回退占位文案）：{genMeta.error}
+            </span>
+          </div>
+        )}
+      </Modal>
     </>
   );
 }

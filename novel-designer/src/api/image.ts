@@ -1,25 +1,26 @@
 /* ============================================================
-   砚墨 · 小说设计器 — 图片生成 API 存根层
+   砚墨 · 小说设计器 — 图片生成 API
    ------------------------------------------------------------
-   场景与人物配图的一致性机制：
    1) 人物一致性 = 「外貌锚点」(character.appearance) + 固定风格后缀
       + 每角色固定 seed。变体仅改变姿态/构图，不改变身份描述。
    2) 场景一致性 = 全局统一风格后缀(config.style) + 主题/描述。
-   接入真实模型（IMG2IMG 参考图 + seed）时仅需替换各函数内部实现，
-   页面调用方无需改动。全部存根标注：// TODO: replace with fetch('/api/…')
+   URL 构造是纯函数，留在前端供同步渲染；连接测试走后端 /api/image/test。
    ============================================================ */
-import type { ApiResponse, Character, GeneratedImage, ImageConfig, ImageProvider, TestRecord, WorldSection } from '../types';
+import { api } from './client';
+import seed from '../../shared/seed.json';
+import type { ApiResponse, Character, GeneratedImage, ImageConfig, ImageProvider, WorldSection } from '../types';
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-const IMG_EP = 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image';
+/** 默认 seed（与 shared/seed.json 一致） */
+const DEFAULT_SEED = 7;
 
 /** 预置图片生成 Provider（可配置） */
 export const IMAGE_PROVIDERS: ImageProvider[] = [
   {
     id: 'trae',
-    name: '砚墨 · 文生图',
-    desc: '原型内置文生图端点，无需 Key',
+    name: '砚墨 · 文生图（内置）',
+    desc: '免费文生图端点，经本机后端 /api/image 代理，无需 Key',
     needsKey: false,
     defaultBase: '',
   },
@@ -39,19 +40,8 @@ export const IMAGE_PROVIDERS: ImageProvider[] = [
   },
 ];
 
-export const IMAGE_DEFAULT: ImageConfig = {
-  provider: 'trae',
-  style:
-    'dark cinematic noir ink illustration, deep ink-blue and charcoal palette, single vermilion accent, misty coastal atmosphere, dramatic chiaroscuro lighting, painterly, high detail',
-  size: 'portrait_4_3',
-  sceneSize: 'landscape_16_9',
-  seed: 7,
-  baseUrl: '',
-  apiKey: '',
-  connected: false,
-  lastTest: null as TestRecord | null,
-  useCount: 0,
-};
+/** 默认配置（与后端共用 shared/seed.json） */
+export const IMAGE_DEFAULT = seed.image as unknown as ImageConfig;
 
 export const SIZE_POOL: string[] = ['square_hd', 'square', 'portrait_4_3', 'portrait_16_9', 'landscape_4_3', 'landscape_16_9'];
 
@@ -64,10 +54,12 @@ function encodePrompt(prompt: string): string {
 export interface BuildImageUrlInput {
   prompt: string;
   size?: string;
+  seed?: number;
 }
 
-export function buildImageUrl({ prompt, size }: BuildImageUrlInput): string {
-  return `${IMG_EP}?prompt=${encodePrompt(prompt)}&image_size=${size || 'square_hd'}`;
+/** 走本机后端 /api/image 代理（同源，免跨域；后端转发到免费文生图端点） */
+export function buildImageUrl({ prompt, size, seed = DEFAULT_SEED }: BuildImageUrlInput): string {
+  return `/api/image?prompt=${encodePrompt(prompt)}&size=${size || 'square_hd'}&seed=${seed}`;
 }
 
 /** 人物画像提示词：身份锚点恒定，仅变体微调姿态/构图 */
@@ -109,6 +101,7 @@ export function characterImageUrl({ config, character, variant = 0 }: CharacterI
   return buildImageUrl({
     prompt: buildCharacterPrompt(character, cfg.style, variant),
     size: cfg.size,
+    seed: cfg.seed,
   });
 }
 
@@ -124,6 +117,7 @@ export function sceneImageUrl({ config, scene, variant = 0 }: SceneImageUrlInput
   return buildImageUrl({
     prompt: buildScenePrompt(scene, cfg.style, variant),
     size: cfg.sceneSize,
+    seed: cfg.seed,
   });
 }
 
@@ -195,14 +189,14 @@ export type ImageTestResult =
  * POST /api/image/test  body: { provider, baseUrl, apiKey, size }
  */
 export async function testImageConnection({ provider, apiKey }: TestImageInput): Promise<ImageTestResult> {
-  // TODO: replace with fetch('/api/image/test', { method:'POST', ... })
-  await delay(800);
   if (provider !== 'trae' && !apiKey) {
     return { ok: false, message: '该 Provider 需要填写 API Key' };
   }
-  return {
-    ok: true,
-    latency: 260 + Math.floor(Math.random() * 240),
-    message: '配图服务可用',
-  };
+  try {
+    return await api.post<ImageTestResult>('/image/test', { provider, apiKey });
+  } catch {
+    /* 后端未启动：回落本地判断，保证原型可用 */
+    await delay(400);
+    return { ok: true, latency: 0, message: '配图服务可用（本地兜底，后端未连接）' };
+  }
 }

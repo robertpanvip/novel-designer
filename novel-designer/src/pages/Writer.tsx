@@ -4,7 +4,7 @@
    正文受控 + 简单防抖写入 store；AI 生成走 api 存根。
    TODO: 接入真实后端 —— 替换 runAI 存根为真实接口调用
    ============================================================ */
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Plus,
@@ -21,11 +21,16 @@ import {
   Quote,
   BookOpen,
   ChevronRight,
+  UserPen,
+  UserPlus,
+  Trash2,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { Card, Button, Input, Select, Tag, EmptyState } from '../components/ui';
+import { Card, Button, Input, Select, Tag, EmptyState, IconBtn } from '../components/ui';
 import { useStore } from '../store/AppStore';
 import { runAI } from '../api/llm';
+import { dbApi } from '../api/db';
+import type { ExtractPayload } from '../api/db';
 import type { AIActionKey, ChapterStatus } from '../types';
 
 // 章节状态 → 文案 / 状态点颜色
@@ -46,12 +51,19 @@ const AI_ACTIONS: { key: AIActionKey; label: string; icon: LucideIcon }[] = [
 ];
 
 export default function Writer() {
-  const { chapters, llm, actions } = useStore();
+  const { chapters, characters, world, llm, actions } = useStore();
   const navigate = useNavigate();
 
   // 选中章节（默认第一章）
   const [selectedId, setSelectedId] = useState<string | null>(chapters[0]?.id || null);
   const selected = chapters.find((c) => c.id === selectedId) || null;
+
+  // 选中章节被删除后，自动落到第一-available 章节
+  useEffect(() => {
+    if (selectedId && !chapters.some((c) => c.id === selectedId)) {
+      setSelectedId(chapters[0]?.id || null);
+    }
+  }, [chapters, selectedId]);
 
   // 正文本地草稿（受控输入源），切换章节时重新载入
   const [draft, setDraft] = useState(selected?.content || '');
@@ -89,6 +101,44 @@ export default function Writer() {
   const handleNewChapter = () => {
     actions.insertChapter({ title: '未命名章节' });
     actions.toast('已新建章节', 'success');
+  };
+
+  // 删除章节：确认后删除；剩余章节号自动重排，选中态自动落到第一-available 章节
+  const handleDeleteChapter = (id: string, title: string) => {
+    if (!window.confirm(`确定删除「${title}」？正文将一并删除，不可恢复。`)) return;
+    actions.removeChapter(id);
+    actions.toast('已删除章节，后续章节号已重排', 'success');
+  };
+
+  /* ---------- 一键改名（全文替换人名） ---------- */
+  const [renamerOpen, setRenamerOpen] = useState(false);
+  const [renameFrom, setRenameFrom] = useState('');
+  const [renameTo, setRenameTo] = useState('');
+  const [renaming, setRenaming] = useState(false);
+
+  const renameHit = useMemo(() => {
+    if (!renameFrom) return 0;
+    const n = (s: string): number => (s ? s.split(renameFrom).length - 1 : 0);
+    return chapters.reduce((acc, c) => acc + n(c.content) + n(c.summary) + n(c.title), 0);
+  }, [chapters, renameFrom]);
+
+  const canRename = Boolean(renameFrom) && renameTo.trim().length > 0 && renameFrom !== renameTo.trim();
+
+  const doRename = async () => {
+    if (!canRename || renaming) return;
+    setRenaming(true);
+    const ok = await actions.renameCharacter(renameFrom, renameTo.trim());
+    setRenaming(false);
+    if (!ok) return;
+    // 当前编辑中的本地草稿同步替换，并强制重发一次，防止未 flush 的旧正文把旧名写回后端
+    if (selected) {
+      const next = draft.split(renameFrom).join(renameTo.trim());
+      setDraft(next);
+      actions.updateChapter(selected.id, { content: next });
+    }
+    setRenameFrom('');
+    setRenameTo('');
+    setRenamerOpen(false);
   };
 
   // 在光标处插入文本；caretOffset 控制插入后的光标位置
@@ -169,6 +219,91 @@ export default function Writer() {
     actions.toast('已替换选中文本', 'success');
   };
 
+  /* ---------- 提取角色/势力 → 同步到角色库与世界观 ---------- */
+  const [syncOpen, setSyncOpen] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [extract, setExtract] = useState<ExtractPayload | null>(null);
+  const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const [syncing, setSyncing] = useState(false);
+
+  const knownChars = useMemo(() => new Set(characters.map((c) => c.name)), [characters]);
+  const knownFactions = useMemo(
+    () => new Set(world.sections.flatMap((s) => s.items.map((i) => i.title))),
+    [world],
+  );
+
+  const openSync = async () => {
+    setSyncOpen(true);
+    if (extract || scanning) return;
+    if (!selected) {
+      actions.toast('请先选择章节', 'warning');
+      setSyncOpen(false);
+      return;
+    }
+    setScanning(true);
+    try {
+      const res = await dbApi.extractEntities(selected.content || '');
+      if (!res.ai) {
+        actions.toast(res.message || '未能识别出人物/势力，请重试', 'warning');
+        setSyncOpen(false);
+        return;
+      }
+      const newChars = res.characters.filter((x) => !knownChars.has(x.name));
+      const newFacs = res.factions.filter((x) => !knownFactions.has(x.name));
+      if (!newChars.length && !newFacs.length) {
+        actions.toast('本章节没有发现需要新增的人物或势力', 'default');
+        setSyncOpen(false);
+        return;
+      }
+      setExtract({ ai: true, characters: newChars, factions: newFacs });
+      setPicked(
+        Object.fromEntries(
+          [...newChars.map((c) => `c:${c.name}`), ...newFacs.map((f) => `f:${f.name}`)].map((k) => [k, true]),
+        ),
+      );
+    } catch {
+      actions.toast('识别失败，请稍后再试', 'danger');
+      setSyncOpen(false);
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const confirmSync = () => {
+    if (!extract || syncing) return;
+    const facSection = world.sections.find((s) => s.type === '势力') ?? world.sections[0];
+    let n = 0;
+    for (const c of extract.characters) {
+      if (!picked[`c:${c.name}`]) continue;
+      actions.addCharacter({
+        name: c.name,
+        title: '',
+        color: '#8A93A6',
+        tags: ['待完善'],
+        appearance: '',
+        identity: c.identity || '（待补充）',
+        personality: '',
+        goals: [],
+        arc: '',
+        note: '',
+        relations: [],
+      });
+      n += 1;
+    }
+    for (const f of extract.factions) {
+      if (!picked[`f:${f.name}`]) continue;
+      if (facSection) actions.addWorldItem(facSection.id, { title: f.name, desc: f.desc || '（待补充）' });
+      n += 1;
+    }
+    setSyncing(true);
+    actions.toast(n > 0 ? `已同步 ${n} 项到角色库 / 世界观` : '未勾选任何条目', n > 0 ? 'success' : 'default');
+    setSyncOpen(false);
+    setExtract(null);
+    setSyncing(false);
+  };
+
+  const togglePick = (key: string) => setPicked((p) => ({ ...p, [key]: !p[key] }));
+
   const currentLabel = AI_ACTIONS.find((a) => a.key === genAction)?.label || '';
 
   return (
@@ -186,6 +321,15 @@ export default function Writer() {
           </div>
           <Button variant="gold" size="sm" icon={Plus} onClick={handleNewChapter} style={{ width: '100%', marginTop: 10 }}>
             新章节
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={UserPen}
+            onClick={() => setRenamerOpen((v) => !v)}
+            style={{ width: '100%', marginTop: 6 }}
+          >
+            一键改名
           </Button>
         </div>
 
@@ -220,6 +364,17 @@ export default function Writer() {
                   >
                     {c.title}
                   </span>
+                  <div style={{ marginLeft: 'auto', flex: 'none' }}>
+                    <IconBtn
+                      icon={Trash2}
+                      danger
+                      label={`删除 ${c.title}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteChapter(c.id, c.title);
+                      }}
+                    />
+                  </div>
                 </div>
                 <div className="row" style={{ gap: 8, marginTop: 5 }}>
                   <span style={{ width: 7, height: 7, borderRadius: '50%', background: meta.color, flex: 'none' }} />
@@ -239,10 +394,78 @@ export default function Writer() {
             </div>
           )}
         </div>
+
+        {/* 一键改名面板：选角色 → 输新名 → 全文替换 */}
+        {renamerOpen && (
+          <div style={{ padding: 12, borderTop: '1px solid var(--border)', display: 'grid', gap: 8 }}>
+            <div className="row-between">
+              <span style={{ fontSize: 12.5, fontWeight: 700 }}>一键改名</span>
+              <button
+                onClick={() => setRenamerOpen(false)}
+                className="faint"
+                style={{ fontSize: 11, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+              >
+                收起
+              </button>
+            </div>
+            <Input
+              value={renameFrom}
+              onChange={(e) => setRenameFrom(e.target.value)}
+              placeholder="输入要改掉的旧名字"
+            />
+            {characters.length > 0 && (
+              <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                {characters.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setRenameFrom(c.name)}
+                    style={{
+                      fontSize: 11.5,
+                      padding: '3px 9px',
+                      borderRadius: 999,
+                      border: '1px solid var(--border)',
+                      cursor: 'pointer',
+                      background: renameFrom === c.name ? 'var(--primary-soft)' : 'transparent',
+                      color: renameFrom === c.name ? 'var(--text)' : 'var(--text-sub)',
+                    }}
+                  >
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            <Input
+              value={renameTo}
+              onChange={(e) => setRenameTo(e.target.value)}
+              placeholder="输入新名字"
+            />
+            <span className="faint" style={{ fontSize: 11, lineHeight: 1.7 }}>
+              {renameFrom ? (
+                <>
+                  「{renameFrom}」在章节中出现 <b style={{ color: 'var(--warning)' }}>{renameHit}</b> 处。将替换所有章节的正文、摘要、标题，
+                  以及角色卡、世界观、情节、时间线中的旧名。
+                </>
+              ) : (
+                '输入旧名字与新名字（若已建角色卡，点名字可快速填入）。'
+              )}
+            </span>
+            <Button
+              variant="gold"
+              size="sm"
+              icon={Wand2}
+              disabled={!canRename || renaming}
+              onClick={() => void doRename()}
+              style={{ width: '100%' }}
+            >
+              {renaming ? '替换中…' : '全文替换'}
+            </Button>
+          </div>
+        )}
       </Card>
 
       {/* ===== 中栏：编辑器 ===== */}
-      <Card style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <Card style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
         {selected ? (
           <>
             {/* 顶部工具栏：标题 / 状态 / 字数 */}
@@ -297,11 +520,117 @@ export default function Writer() {
               <Button variant="ghost" size="sm" icon={Quote} onClick={() => insertAtCursor('「」', 1)}>
                 插入对话引号
               </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={UserPlus}
+                disabled={scanning || syncing}
+                onClick={() => void openSync()}
+              >
+                {scanning ? '识别中…' : '提取角色/势力'}
+              </Button>
               <div className="grow" />
               <span className="faint" style={{ fontSize: 12 }}>
                 更新于 {selected.updatedAt}
               </span>
             </div>
+
+            {/* 提取结果浮层：勾选后同步到角色库 / 世界观 */}
+            {syncOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  right: 16,
+                  bottom: 56,
+                  width: 380,
+                  maxHeight: '70%',
+                  overflowY: 'auto',
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 12,
+                  boxShadow: '0 12px 40px rgba(0,0,0,.35)',
+                  padding: 14,
+                  zIndex: 30,
+                }}
+              >
+                <div className="row-between" style={{ marginBottom: 10 }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 700 }}>同步到角色库 / 世界观</span>
+                  <button
+                    onClick={() => { setSyncOpen(false); setExtract(null); }}
+                    className="faint"
+                    style={{ fontSize: 11.5, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                  >
+                    关闭
+                  </button>
+                </div>
+
+                {extract && extract.characters.length > 0 && (
+                  <>
+                    <div className="faint" style={{ fontSize: 11.5, marginBottom: 6 }}>人物（新增角色卡）</div>
+                    <div style={{ display: 'grid', gap: 6, marginBottom: 12 }}>
+                      {extract.characters.map((c) => (
+                        <label
+                          key={c.name}
+                          className="row"
+                          style={{ gap: 8, cursor: 'pointer', fontSize: 12.5, alignItems: 'flex-start' }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={Boolean(picked[`c:${c.name}`])}
+                            onChange={() => togglePick(`c:${c.name}`)}
+                            style={{ marginTop: 2 }}
+                          />
+                          <span>
+                            <b>{c.name}</b>
+                            {c.identity && (
+                              <span className="faint" style={{ display: 'block', fontSize: 11.5, marginTop: 2 }}>
+                                {c.identity}
+                              </span>
+                            )}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {extract && extract.factions.length > 0 && (
+                  <>
+                    <div className="faint" style={{ fontSize: 11.5, marginBottom: 6 }}>势力 / 组织（写入世界观 · 组织与势力）</div>
+                    <div style={{ display: 'grid', gap: 6, marginBottom: 12 }}>
+                      {extract.factions.map((f) => (
+                        <label
+                          key={f.name}
+                          className="row"
+                          style={{ gap: 8, cursor: 'pointer', fontSize: 12.5, alignItems: 'flex-start' }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={Boolean(picked[`f:${f.name}`])}
+                            onChange={() => togglePick(`f:${f.name}`)}
+                            style={{ marginTop: 2 }}
+                          />
+                          <span>
+                            <b>{f.name}</b>
+                            {f.desc && (
+                              <span className="faint" style={{ display: 'block', fontSize: 11.5, marginTop: 2 }}>
+                                {f.desc}
+                              </span>
+                            )}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {extract && (
+                  <Button variant="gold" size="sm" onClick={confirmSync} disabled={syncing} style={{ width: '100%' }}>
+                    {syncing ? '同步中…' : '同步勾选项'}
+                  </Button>
+                )}
+              </div>
+            )}
           </>
         ) : (
           /* 空态：无章节 */

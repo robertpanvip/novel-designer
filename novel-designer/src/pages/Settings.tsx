@@ -8,7 +8,7 @@
 import { useEffect, useState } from 'react';
 import {
   Cpu, Eye, EyeOff, Plug, Save, RotateCcw, Check, ChevronDown,
-  PenLine, Expand, Sparkles, RefreshCw, Lightbulb, ShieldCheck,
+  PenLine, Expand, Sparkles, RefreshCw, Lightbulb, ShieldCheck, FileText,
   CheckCircle2, XCircle, Wand2,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -23,7 +23,7 @@ import { IMAGE_PROVIDERS, IMAGE_DEFAULT, testImageConnection, SIZE_POOL } from '
 import type { ImageTestResult } from '../api/image';
 import type { AIActionKey, Provider, UsageData } from '../types';
 
-/* 六种创作能力的动作元信息（对应 llm.actions 的键） */
+/* 六种创作能力 + 一键成稿的动作元信息（对应 llm.actions 的键） */
 const ACTION_META: { key: AIActionKey; label: string; icon: LucideIcon; hint: string }[] = [
   { key: 'continue', label: '续写', icon: PenLine, hint: '顺着已有文风自然续写 300–500 字' },
   { key: 'expand', label: '扩写', icon: Expand, hint: '丰富细节与层次，扩至原稿 1.5–2 倍' },
@@ -31,6 +31,7 @@ const ACTION_META: { key: AIActionKey; label: string; icon: LucideIcon; hint: st
   { key: 'rewrite', label: '改写', icon: RefreshCw, hint: '以不同视角或语气重写' },
   { key: 'brainstorm', label: '灵感', icon: Lightbulb, hint: '给出差异化剧情走向' },
   { key: 'consistency', label: '一致性', icon: ShieldCheck, hint: '对照设定检查冲突与矛盾' },
+  { key: 'draft', label: '成稿', icon: FileText, hint: '依据世界观与情节大纲生成整章初稿（工作台「一键成稿」使用）' },
 ];
 
 /* 用量统计小方块 */
@@ -44,9 +45,44 @@ function UsageStat({ value, label }: { value: string; label: string }) {
 }
 
 export default function Settings() {
-  const { llm, img, actions } = useStore();
+  const { project, llm, img, actions } = useStore();
   const currentProvider = PROVIDERS.find((p) => p.id === llm.provider);
   const imgProvider = IMAGE_PROVIDERS.find((p) => p.id === img.provider);
+
+  /* ===== 作品信息表单（独立本地态，显式保存） ===== */
+  const [pTitle, setPTitle] = useState(project.title);
+  const [pTagline, setPTagline] = useState(project.tagline);
+  const [pGenre, setPGenre] = useState(project.genre);
+  const [pSynopsis, setPSynopsis] = useState(project.synopsis);
+  const [pCover, setPCover] = useState(project.cover);
+  const projectDirty =
+    pTitle !== project.title ||
+    pTagline !== project.tagline ||
+    pGenre !== project.genre ||
+    pSynopsis !== project.synopsis ||
+    pCover !== project.cover;
+  const saveProject = () => {
+    const title = pTitle.trim();
+    if (!title) {
+      actions.toast('书名不能为空', 'warning');
+      return;
+    }
+    actions.updateProject({
+      title,
+      tagline: pTagline.trim(),
+      genre: pGenre.trim(),
+      synopsis: pSynopsis,
+      cover: pCover.trim(),
+    });
+    actions.toast('作品信息已保存', 'success');
+  };
+  const resetProjectForm = () => {
+    setPTitle(project.title);
+    setPTagline(project.tagline);
+    setPGenre(project.genre);
+    setPSynopsis(project.synopsis);
+    setPCover(project.cover);
+  };
 
   const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -68,7 +104,7 @@ export default function Settings() {
     let alive = true;
     setModelsLoading(true);
     listModels(llm.provider)
-      .then((res) => { if (alive) { setModels(res.data || []); setModelsLoading(false); } })
+      .then((list) => { if (alive) { setModels(list || []); setModelsLoading(false); } })
       .catch(() => { if (alive) { setModels([]); setModelsLoading(false); } });
     return () => { alive = false; };
   }, [llm.provider]);
@@ -180,8 +216,8 @@ export default function Settings() {
   return (
     <>
       <PageHead
-        title="大模型配置"
-        sub="可接入任意 OpenAI 兼容大模型；API 密钥仅保存在本机浏览器 localStorage，不会上传到任何服务器。"
+        title="设置"
+        sub="管理作品信息、接入大模型与配图服务。作品信息改动后会在工作台、侧栏即时生效。"
         actions={
           <Tag tone={llm.connected ? 't-success' : undefined} style={{ gap: 6 }}>
             <span
@@ -197,6 +233,58 @@ export default function Settings() {
       />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+        {/* ---- 0. 作品信息 ---- */}
+        <Card className="reveal" style={{ '--d': '0ms', padding: '20px 22px' }}>
+          <SectionHead
+            title="作品信息"
+            sub="书名与基础元数据，会显示在工作台与侧栏标题处"
+          />
+          <Field label="书名 *" hint="作品的主标题，保存后会立即同步到工作台与侧栏">
+            <Input
+              value={pTitle}
+              onChange={(e) => setPTitle(e.target.value)}
+              placeholder="如：雾港潮生"
+            />
+          </Field>
+          <Field label="一句话标签" hint="副标题或宣传语，会显示在工作台">
+            <Input
+              value={pTagline}
+              onChange={(e) => setPTagline(e.target.value)}
+              placeholder="如：一座雾港，三十年的秘密"
+            />
+          </Field>
+          <Field label="类型" hint="体裁分类（悬疑 / 都市 / 奇幻…）">
+            <Input
+              value={pGenre}
+              onChange={(e) => setPGenre(e.target.value)}
+              placeholder="如：悬疑 · 都市"
+            />
+          </Field>
+          <Field label="简介" hint="故事的整体设定与主线">
+            <Textarea
+              rows={4}
+              value={pSynopsis}
+              onChange={(e) => setPSynopsis(e.target.value)}
+              placeholder="故事发生在…"
+            />
+          </Field>
+          <Field label="封面 URL" hint="可选；留空则使用默认封面">
+            <Input
+              value={pCover}
+              onChange={(e) => setPCover(e.target.value)}
+              placeholder="https://…"
+            />
+          </Field>
+          <div className="row-between" style={{ marginTop: 4 }}>
+            <Button variant="ghost" icon={RotateCcw} onClick={resetProjectForm} disabled={!projectDirty}>
+              放弃修改
+            </Button>
+            <Button variant="primary" icon={Save} onClick={saveProject} disabled={!projectDirty}>
+              保存作品信息
+            </Button>
+          </div>
+        </Card>
 
         {/* ---- 1. 服务商选择 ---- */}
         <Card className="reveal" style={{ '--d': '40ms', padding: '20px 22px' }}>

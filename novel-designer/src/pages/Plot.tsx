@@ -7,13 +7,15 @@
    ============================================================ */
 import { useMemo, useState } from 'react';
 import {
-  GitBranch, Plus, Trash2, CheckCircle2, RotateCcw, ListChecks,
+  GitBranch, Plus, Trash2, CheckCircle2, RotateCcw, ListChecks, Sparkles, Loader2, Pencil,
 } from 'lucide-react';
 import {
   Button, IconBtn, Field, Input, Select, Textarea, Tag, Card,
   SectionHead, PageHead, Modal, EmptyState, ProgressRing,
 } from '../components/ui';
 import { useStore } from '../store/AppStore';
+import { dbApi } from '../api/db';
+import type { ExtractedPlotBeat } from '../api/db';
 import type { PlotNode } from '../types';
 
 /* 节拍类型 → Tag tone 分色 */
@@ -39,6 +41,10 @@ interface PlotForm {
   summary: string;
   conflict: string;
   pov: string;
+  /** 编辑模式：被编辑节拍的 id（新增时为 null） */
+  editingId: string | null;
+  /** 编辑模式：节点当前所属幕（跨幕移动时以此定位） */
+  origActId: string;
 }
 
 export default function Plot() {
@@ -67,13 +73,31 @@ export default function Plot() {
       summary: '',
       conflict: '',
       pov: '陆昭',
+      editingId: null,
+      origActId: '',
+    });
+    setModalOpen(true);
+  };
+
+  /* 打开编辑节拍：预填当前值 */
+  const openEdit = (actId: string, node: PlotNode) => {
+    setForm({
+      actId,
+      chapterNo: node.chapterNo,
+      type: node.type,
+      title: node.title,
+      summary: node.summary || '',
+      conflict: node.conflict || '',
+      pov: node.pov,
+      editingId: node.id,
+      origActId: actId,
     });
     setModalOpen(true);
   };
 
   const set = <K extends keyof PlotForm>(k: K, v: PlotForm[K]) => setForm((f) => (f ? { ...f, [k]: v } : null));
 
-  /* 新增节拍：校验所属幕与标题后写入 store */
+  /* 新增 / 保存编辑节拍 */
   const submit = () => {
     if (!form) return;
     if (!form.actId) {
@@ -84,15 +108,25 @@ export default function Plot() {
       actions.toast('请填写节拍标题', 'warning');
       return;
     }
-    actions.addPlotNode(form.actId, {
+    const fields = {
       type: form.type,
       chapterNo: Number(form.chapterNo) || 0,
       title: form.title.trim(),
       summary: form.summary.trim(),
       conflict: form.conflict.trim(),
       pov: form.pov.trim() || '陆昭',
-    });
-    actions.toast('已新增节拍', 'success');
+    };
+    if (form.editingId) {
+      /* 编辑：actId 变了则附带跨幕移动 */
+      actions.updatePlotNode(form.origActId, form.editingId, {
+        ...fields,
+        ...(form.actId !== form.origActId ? { actId: form.actId } : {}),
+      });
+      actions.toast(form.actId !== form.origActId ? '已保存并移动到新幕' : '已保存修改', 'success');
+    } else {
+      actions.addPlotNode(form.actId, fields);
+      actions.toast('已新增节拍', 'success');
+    }
     setModalOpen(false);
   };
 
@@ -111,6 +145,89 @@ export default function Plot() {
     }
   };
 
+  /* ---------- AI 提炼节拍 ---------- */
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiText, setAiText] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiBeats, setAiBeats] = useState<ExtractedPlotBeat[] | null>(null);
+  const [aiChecked, setAiChecked] = useState<Set<number>>(new Set());
+
+  const openAI = () => {
+    setAiText('');
+    setAiBeats(null);
+    setAiChecked(new Set());
+    setAiOpen(true);
+  };
+
+  const runExtract = async () => {
+    if (!plot.acts.length) {
+      actions.toast('请先建立幕结构，再进行提炼', 'warning');
+      return;
+    }
+    if (!aiText.trim()) {
+      actions.toast('请先粘贴剧情素材', 'warning');
+      return;
+    }
+    setAiBusy(true);
+    try {
+      const r = await dbApi.extractPlot(aiText);
+      if (!r.ai || !r.beats.length) {
+        actions.toast(r.message || 'AI 未能提炼出节拍，请换段更详细的剧情文本试试', 'warning');
+        return;
+      }
+      setAiBeats(r.beats);
+      setAiChecked(new Set(r.beats.map((_, i) => i)));
+      actions.toast(`AI 提炼出 ${r.beats.length} 个节拍，请确认后导入`, 'success');
+    } catch {
+      actions.toast('提炼失败：后端未连接或大模型调用出错', 'danger');
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  /* 修改预览中的某个节拍字段 */
+  const patchBeat = (i: number, patch: Partial<ExtractedPlotBeat>) =>
+    setAiBeats((bs) => (bs ? bs.map((b, j) => (j === i ? { ...b, ...patch } : b)) : bs));
+
+  const toggleBeat = (i: number) => {
+    setAiChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) {
+        next.delete(i);
+      } else {
+        next.add(i);
+      }
+      return next;
+    });
+  };
+
+  /* 导入勾选节拍：复用现有新增链路（在线同步后端，离线也有本地兜底） */
+  const doImport = () => {
+    if (!aiBeats) return;
+    const picked = aiBeats.filter((_, i) => aiChecked.has(i));
+    if (!picked.length) {
+      actions.toast('请至少勾选一个节拍', 'warning');
+      return;
+    }
+    let imported = 0;
+    picked.forEach((b) => {
+      const act = plot.acts.find((a) => a.phase === b.actPhase) ?? plot.acts[0];
+      if (!act) return;
+      actions.addPlotNode(act.id, {
+        type: b.type,
+        chapterNo: b.chapterNo,
+        title: b.title,
+        summary: b.summary,
+        conflict: b.conflict,
+        pov: b.pov || '陆昭',
+      });
+      imported += 1;
+    });
+    actions.toast(imported ? `已导入 ${imported} 个节拍` : '没有可导入的节拍（幕结构缺失）', imported ? 'success' : 'warning');
+    setAiOpen(false);
+    setAiBeats(null);
+  };
+
   return (
     <>
       <PageHead
@@ -118,9 +235,14 @@ export default function Plot() {
         title="大纲"
         sub="三幕式结构总览 · 从「引潮」到「退潮」，每一幕用专属色标注，节拍即剧情的最小推进单元。"
         actions={
-          <Button variant="primary" icon={Plus} onClick={openModal}>
-            新增节拍
-          </Button>
+          <div className="row" style={{ gap: 8 }}>
+            <Button variant="outline" icon={Sparkles} onClick={openAI}>
+              AI 提炼节拍
+            </Button>
+            <Button variant="primary" icon={Plus} onClick={openModal}>
+              新增节拍
+            </Button>
+          </div>
         }
       />
 
@@ -256,6 +378,7 @@ export default function Plot() {
                           >
                             {node.status === 'done' ? <><RotateCcw size={13} /> 撤销完成</> : <><CheckCircle2 size={13} /> 标记完成</>}
                           </button>
+                          <IconBtn icon={Pencil} label={`编辑 ${node.title}`} onClick={() => openEdit(act.id, node)} />
                           <IconBtn icon={Trash2} danger label="删除节拍" onClick={() => removeNode(act.id, node)} />
                         </div>
                       </div>
@@ -268,22 +391,24 @@ export default function Plot() {
         </>
       )}
 
-      {/* ---- 新增节拍 Modal ---- */}
+      {/* ---- 新增 / 编辑节拍 Modal ---- */}
       {form && (
         <Modal
           open={modalOpen}
-          title="新增节拍"
+          title={form.editingId ? '编辑节拍' : '新增节拍'}
           onClose={() => setModalOpen(false)}
           width={640}
           footer={
             <>
               <Button variant="ghost" onClick={() => setModalOpen(false)}>取消</Button>
-              <Button variant="primary" icon={Plus} onClick={submit}>创建节拍</Button>
+              <Button variant="primary" icon={form.editingId ? CheckCircle2 : Plus} onClick={submit}>
+                {form.editingId ? '保存修改' : '创建节拍'}
+              </Button>
             </>
           }
         >
           <div className="grid grid-2" style={{ gap: 4 }}>
-            <Field label="所属幕" hint="选择该节拍所处的三幕结构">
+            <Field label="所属幕" hint={form.editingId ? '可改选其他幕，保存后自动移动' : '选择该节拍所处的三幕结构'}>
               <Select value={form.actId} onChange={(e) => set('actId', e.target.value)}>
                 {plot.acts.map((a) => (
                   <option key={a.id} value={a.id}>{a.name}</option>
@@ -313,6 +438,117 @@ export default function Plot() {
           </div>
         </Modal>
       )}
+
+      {/* ---- AI 提炼节拍 Modal（两步：贴文本 → 预览确认） ---- */}
+      <Modal
+        open={aiOpen}
+        title="AI 提炼节拍"
+        onClose={() => !aiBusy && setAiOpen(false)}
+        width={720}
+        footer={
+          aiBeats ? (
+            <>
+              <Button variant="ghost" onClick={() => setAiBeats(null)}>返回修改文本</Button>
+              <Button variant="primary" icon={CheckCircle2} onClick={doImport}>导入勾选节拍</Button>
+            </>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={() => setAiOpen(false)}>取消</Button>
+              <Button variant="primary" icon={Sparkles} loading={aiBusy} onClick={runExtract}>
+                {aiBusy ? '提炼中…' : '开始提炼'}
+              </Button>
+            </>
+          )
+        }
+      >
+        {aiBeats ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 430, overflowY: 'auto' }}>
+            {aiBeats.map((b, i) => {
+              const act = plot.acts.find((a) => a.phase === b.actPhase);
+              return (
+                <div
+                  key={i}
+                  style={{
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--r-md)',
+                    padding: '10px 12px',
+                    opacity: aiChecked.has(i) ? 1 : 0.55,
+                    background: 'var(--bg-raised)',
+                  }}
+                >
+                  <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                    <input type="checkbox" checked={aiChecked.has(i)} onChange={() => toggleBeat(i)} />
+                    <Select
+                      value={act?.id ?? ''}
+                      onChange={(e) => {
+                        const a = plot.acts.find((x) => x.id === e.target.value);
+                        patchBeat(i, { actPhase: a?.phase ?? b.actPhase });
+                      }}
+                      style={{ width: 128 }}
+                    >
+                      {plot.acts.map((a) => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))}
+                    </Select>
+                    <Select value={b.type} onChange={(e) => patchBeat(i, { type: e.target.value })} style={{ width: 90 }}>
+                      {NODE_TYPES.map((t) => <option key={t}>{t}</option>)}
+                    </Select>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={b.chapterNo}
+                      onChange={(e) => patchBeat(i, { chapterNo: Number(e.target.value) || 0 })}
+                      style={{ width: 82 }}
+                    />
+                    <Input value={b.title} onChange={(e) => patchBeat(i, { title: e.target.value })} style={{ flex: 1, minWidth: 140 }} />
+                  </div>
+                  <Textarea
+                    rows={2}
+                    value={b.summary}
+                    onChange={(e) => patchBeat(i, { summary: e.target.value })}
+                    placeholder="摘要"
+                    style={{ marginTop: 8 }}
+                  />
+                  <div className="row" style={{ gap: 8, marginTop: 8 }}>
+                    <Input
+                      value={b.conflict}
+                      onChange={(e) => patchBeat(i, { conflict: e.target.value })}
+                      placeholder="冲突（可空）"
+                      style={{ flex: 1 }}
+                    />
+                    <Input
+                      value={b.pov}
+                      onChange={(e) => patchBeat(i, { pov: e.target.value })}
+                      placeholder="POV"
+                      style={{ width: 110 }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <>
+            <Field
+              label="剧情素材"
+              hint="草稿 / 笔记 / 旧稿 / 梗概均可，最多取前 2 万字；AI 会按你现有的三幕结构归幕并编排章节号。"
+            >
+              <Textarea
+                rows={10}
+                value={aiText}
+                onChange={(e) => setAiText(e.target.value)}
+                placeholder="把包含剧情的文本粘贴到这里…"
+              />
+            </Field>
+            {aiBusy && (
+              <div className="row" style={{ gap: 8, marginTop: 10 }}>
+                <Loader2 size={14} className="spin" style={{ color: 'var(--gold)' }} />
+                <span className="sub" style={{ fontSize: 12.5 }}>AI 正在提炼节拍，长文本可能需要 1~2 分钟，请勿关闭窗口…</span>
+              </div>
+            )}
+          </>
+        )}
+      </Modal>
     </>
   );
 }

@@ -1,0 +1,27 @@
+/* ============================================================
+   砚墨 · 本地自托管字体（不再请求 fonts.googleapis.com）
+   ------------------------------------------------------------
+   字体文件来自 npm @fontsource/* 包，构建时由 Vite 打包进产物，
+   运行时零外部请求、可离线使用。
+   字重与 index.html 原先引用的 Google Fonts 保持一致：
+     Noto Serif SC  500 / 600 / 700 / 900   → --font-display
+     Noto Sans  SC  400 / 500 / 700         → --font-body
+     JetBrains Mono  400 / 500 / 600        → --font-mono
+   CJK 按 unicode-range 切成上百个子集，浏览器只会按需下载命中的那几个。
+   ============================================================ */
+
+/* 标题 / 引文 —— 宋体 */
+@import '@fontsource/noto-serif-sc/500.css';
+@import '@fontsource/noto-serif-sc/600.css';
+@import '@fontsource/noto-serif-sc/700.css';
+@import '@fontsource/noto-serif-sc/900.css';
+
+/* 正文 —— 黑体 */
+@import '@fontsource/noto-sans-sc/400.css';
+@import '@fontsource/noto-sans-sc/500.css';
+@import '@fontsource/noto-sans-sc/700.css';
+
+/* 代码 / 数字 —— 等宽 */
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/500.css';
+@import '@fontsource/jetbrains-mono/600.css';
